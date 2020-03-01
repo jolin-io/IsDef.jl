@@ -11,13 +11,8 @@ The only exception is Any, for which `isdef` returns true only if given an abstr
 for a newtype of the abstract type. (E.g. ``f(a) = 1`` )
 """
 module IsDef
-export isdef, Out, NotApplicable, @create_newtype, @reload_newtype
-
-# Helpers
-# =======
-
-include("Utils.jl")
-using .Utils
+export isdef, Out, NotApplicable, @reload
+import InteractiveUtils
 
 
 # Core Interface
@@ -86,6 +81,12 @@ function _return_type(f, types::Type{<:Tuple})
   newtype_inverse(Core.Compiler.return_type(f, newtype_signature(types)))
 end
 
+
+
+# Helpers
+# =======
+
+
 newtype_inverse(T::Type{NewType}) = Any
 newtype_inverse(T) = T
 
@@ -101,6 +102,21 @@ macro reload()
       Tuple{IsDef.Utils.Type2Union.(T.parameters)...}
     end
   end)
+end
+
+Type2Union(T) = Union{leaftypes(T)...}
+Type2Union(T::Type{Any}) = NewType  # only Any is dealed with as open world
+
+struct NewType end
+
+function leaftypes(T)
+  # InteractiveUtils.subtypes is super mighty in that it can already deal with UnionAll types
+  subtypes = InteractiveUtils.subtypes(T)
+  if isempty(subtypes)
+    [T]
+  else
+    vcat((leaftypes(S) for S in subtypes)...)
+  end
 end
 
 end # module
