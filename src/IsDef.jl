@@ -34,7 +34,7 @@ end
 """
 function isdef(f, types::Vararg{<:Type})
   signature_type = Tuple{types...}
-  _return_type(f, signature_type) !== Union{}
+  !isbottom(_return_type(f, signature_type))
 end
 isdef(f, args...) = isdef(f, typeof.(args)...)
 
@@ -58,11 +58,10 @@ end
 """
 function Out(f, types::Vararg{<:Type})
   signature_type = Tuple{types...}
-  _Out(_return_type(f, signature_type))
+  outputtype = _return_type(f, signature_type)
+  isbottom(outputtype) ? NotApplicable : outputtype
 end
 Out(f, args...) = Out(f, typeof.(args)...)
-_Out(outtype::Type{Union{}}) = NotApplicable
-_Out(outtype) = outtype
 
 
 """
@@ -78,37 +77,127 @@ function _return_type(f, types::Type{<:Tuple})
   # TODO we cannot easily make _return_type be @generated because of the dependency to `f`,
   # hence the ``newtype_signature`` and ``newtype_inverse`` are @generated for better type-inference support
   # however for faster user-experience it probably would be good if _return_type as well as isdef and Out can be @generated
-  newtype_inverse(Core.Compiler.return_type(f, newtype_signature(types)))
+  _map_return_type_over_Union(f, new_type_signature(types))
 end
 
+function _map_return_type_over_Union(f, T::Union)
+  Union{new_type_inverse(Core.Compiler.return_type(f, T.a)), _map_return_type_over_Union(f, T.b)}
+end
+function _map_return_type_over_Union(f, T::Type)
+  new_type_inverse(Core.Compiler.return_type(f, T))
+end
+
+# TODO we can improve the type inference by dealing with Union Types ourselves explicitly
+# at least on the outer level, which gives us the possibility to work with non-nested abstract types
+# TODO for this a Tuple{Union, NonUnion, Union, ...} needs to be transformed into
+# a Union{Tuple{NonUnion, NonUnion, NonUnion, ...}}
 
 
-# Helpers
-# =======
 
 
-newtype_inverse(T::Type{NewType}) = Any
-newtype_inverse(T) = T
+# generated functions for better typeinference
+# ============================================
+
+isbottom(T::Type{Union{}}) = true
+isbottom(value) = false
+@generated function isbottom(::Type{T}) where T
+  _isbottom(T)
+end
+function _isbottom(T::Type)
+  base = Base.unwrap_unionall(T)
+  any(base.parameters) do p
+    isbottom(p)
+  end
+end
+function _isbottom(T::Union)
+  _isbottom(T.a) || _isbottom(T.b)
+end
 
 # without ``@generated`` the function does not type-infere in detail
-@generated function newtype_signature(::Type{T}) where T <: Tuple
+function new_type_signature(::Type{T}) where T <: Tuple
   # IMPORTANT!!! also adapt @relaod below
-  Tuple{Type2Union.(T.parameters)...}
+  _new_type_signature(T)
+end
+function _new_type_signature(::Type{T}) where T <: Tuple
+  alltypes = Base.uniontypes.(Type2Union.(T.parameters))
+  combinations = collect(Iterators.product(alltypes...))
+  Union{map(c -> Tuple{c...}, combinations)...}
 end
 
 macro reload()
   esc(quote
     @generated function IsDef.newtype_signature(::Type{T}) where T <: Tuple
-      Tuple{IsDef.Utils.Type2Union.(T.parameters)...}
+      IsDef._new_type_signature(T)
+    end
+    @generated function IsDef.isbottom(::Type{T}) where T
+      IsDef._isbottom(T)
     end
   end)
 end
 
-Type2Union(T) = Union{leaftypes(T)...}
-Type2Union(T::Type{Any}) = NewType  # only Any is dealed with as open world
+
+# Helpers
+# =======
+
+split_unionall(T) = T, []
+function split_unionall(T::UnionAll)
+  S, vars = split_unionall(T.body)
+  S, [T.var; vars]
+end
 
 struct NewType end
+new_type_inverse(T::Type{NewType}) = Any
+new_type_inverse(T) = T
 
+
+Type2Union(T::Type{Any}) = Any  # only Any is dealed with as open world
+function Type2Union(T)
+  leaftypes_with_abstract_typevariables = leaftypes(T)
+  # apparently the current typeinference already works super well if instead of a typevariable-upperbound
+  # ``Vector{<: Number}``
+  # we just use the union
+  # ``Union{Vector{subtype1}, Vector{subtype2}, ... for subtypei in allsubtypes(Number)}``
+  plain_leaftypes = unionall_to_union.(leaftypes_with_abstract_typevariables)
+  # TODO apparently julia's type-inference stops after a Union of three types with the approximate result ``Any``
+  # that is of course not optimal...
+  # I guess best is to wait for a better solution and just overload the _return_type function with your specific needs
+  Union{Type2LeafTypes(T)...}
+end
+
+
+unionall_to_union(type) = unionall_to_union(type, IdDict())
+unionall_to_union(any, dict) = any  # bytetypes in parameters
+function unionall_to_union(typevar::TypeVar, dict::IdDict)
+  # as soon as we visit a typevariable WITHIN the typeparameters (not within the wheres)
+  # this should already be mapped in the dict
+  dict[typevar]
+end
+function unionall_to_union(type::Type, dict::IdDict)
+  if isempty(type.parameters)
+    type
+  else
+    unionall = type.name.wrapper
+    newparameters = [unionall_to_union(p, dict) for p in type.parameters]
+    unionall{newparameters...}
+  end
+end
+function unionall_to_union(type::UnionAll, dict::IdDict)
+  subtypes = allsubtypes(type.var.ub)
+  function recurse_with_new_dict(subtype)
+    newdict = copy(dict)
+    if subtype === Any
+      # in case of Any, we do not do anything practically
+      newdict[type.var] = type.var
+    else
+      newdict[type.var] = subtype
+    end
+    unionall_to_union(type.body, newdict)
+  end
+  Union{recurse_with_new_dict.(subtypes)...}
+end
+
+
+leaftypes(::Type{Any}) = [Any]
 function leaftypes(T)
   # InteractiveUtils.subtypes is super mighty in that it can already deal with UnionAll types
   subtypes = InteractiveUtils.subtypes(T)
@@ -116,6 +205,17 @@ function leaftypes(T)
     [T]
   else
     vcat((leaftypes(S) for S in subtypes)...)
+  end
+end
+
+allsubtypes(::Type{Any}) = [Any]
+function allsubtypes(T)
+  # InteractiveUtils.subtypes is super mighty in that it can already deal with UnionAll types
+  subtypes = InteractiveUtils.subtypes(T)
+  if isempty(subtypes)
+    [T]
+  else
+    vcat(T, (allsubtypes(S) for S in subtypes)...)
   end
 end
 

@@ -4,6 +4,10 @@ using Test
 @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}
 @test isdef(Base.reduce, typeof(+), Vector{<:Number})
 
+# Caution!! Core.Compiler.return_type is actually not always as good as expected:
+Base.promote_op(Base.reduce, typeof(+), Vector{String}) === Union{}
+
+
 # works transparent with wrappers (unlike Base.``which``)
 wrapper(args...; kwargs...) = original(args...; kwargs...)
 original(a::Int, b::String) = true
@@ -13,9 +17,20 @@ original(a::Int, b::String) = true
 # does even work on compiler level
 @test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}
 
-# works in a strict sense with abstracttypes
-# concretely the function has to be defined for the abstracttype to count
+# works in a strict open sense only with Any (would have to work for a whole newtype)
+# for everything else the concrete leave-types are used
 f(a) = a + a
-@test !isdef(f, Any)
+# we decided to leave Any as is, not going to newtype, and hence Any says often yes instead of no
+@test isdef(f, Any)
 @test isdef(f, Number)
 @test isdef(f, Integer)
+@test !isdef(f, String)
+@test !isdef(f, AbstractString)
+@test !isdef(f, Vector{<:String})
+
+@test !isdef(f, Vector{<:AbstractString})
+
+@test isdef(map, typeof(x -> x+4), Array{<:Number, 3})
+@test !isdef(map, typeof(x -> x+4), Vector{String})
+@test !isdef(map, typeof(x -> x+4), Vector{AbstractString})
+@test !isdef(map, typeof(x -> x+4), Vector{<:AbstractString})
