@@ -161,7 +161,7 @@ function Type2Union(T)
   # TODO apparently julia's type-inference stops after a Union of three types with the approximate result ``Any``
   # that is of course not optimal...
   # I guess best is to wait for a better solution and just overload the _return_type function with your specific needs
-  Union{Type2LeafTypes(T)...}
+  Union{plain_leaftypes...}
 end
 
 
