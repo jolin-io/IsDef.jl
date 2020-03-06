@@ -11,8 +11,24 @@ The only exception is Any, for which `isdef` returns true only if given an abstr
 for a newtype of the abstract type. (E.g. ``f(a) = 1`` )
 """
 module IsDef
-export isdef, Out, NotApplicable, @reload
+export isdef, Out, NotApplicable, ∨
 import InteractiveUtils
+
+
+# alias for promote_type to deal with types more compact
+# we choose the symbol for join ``∨`` because promote_type is kind of a maximum (in type-hierarchy, with Any being the top)
+# see https://en.wikipedia.org/wiki/Join_and_meet
+"""
+`∨` (latex `\vee`) is alias for ``promote_type``
+
+when called on values, the values will be cast to types via use of `typeof` for convenience
+"""
+function ∨ end
+T1::Type ∨ T2::Type = promote_type(T1, T2)
+∨(Ts::Type...) = promote_type(Ts...)
+val1 ∨ val2 = typeof(val1) ∨ typeof(val2)
+∨(values...) = ∨(typeof.(values)...)
+
 
 
 # Core Interface
@@ -87,12 +103,6 @@ function _map_return_type_over_Union(f, T::Type)
   new_type_inverse(Core.Compiler.return_type(f, T))
 end
 
-# TODO we can improve the type inference by dealing with Union Types ourselves explicitly
-# at least on the outer level, which gives us the possibility to work with non-nested abstract types
-# TODO for this a Tuple{Union, NonUnion, Union, ...} needs to be transformed into
-# a Union{Tuple{NonUnion, NonUnion, NonUnion, ...}}
-
-
 
 
 # generated functions for better typeinference
@@ -114,25 +124,13 @@ function _isbottom(T::Union)
 end
 
 # without ``@generated`` the function does not type-infere in detail
-function new_type_signature(::Type{T}) where T <: Tuple
-  # IMPORTANT!!! also adapt @relaod below
+@generated function new_type_signature(::Type{T}) where T <: Tuple
   _new_type_signature(T)
 end
 function _new_type_signature(::Type{T}) where T <: Tuple
   alltypes = Base.uniontypes.(Type2Union.(T.parameters))
   combinations = collect(Iterators.product(alltypes...))
   Union{map(c -> Tuple{c...}, combinations)...}
-end
-
-macro reload()
-  esc(quote
-    @generated function IsDef.newtype_signature(::Type{T}) where T <: Tuple
-      IsDef._new_type_signature(T)
-    end
-    @generated function IsDef.isbottom(::Type{T}) where T
-      IsDef._isbottom(T)
-    end
-  end)
 end
 
 

@@ -27,7 +27,6 @@ f(a) = a + a
 @test !isdef(f, String)
 @test !isdef(f, AbstractString)
 @test !isdef(f, Vector{<:String})
-
 @test !isdef(f, Vector{<:AbstractString})
 
 @test isdef(map, typeof(x -> x+4), Array{<:Number, 3})
