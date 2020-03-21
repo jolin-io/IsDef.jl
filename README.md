@@ -1,21 +1,21 @@
 # IsDef.jl
 
 This package provides primitives for dispatching on whether certain methods are implemented or not.
-It exports two functions for general usage `isdef(f, Arg1Type, Arg2Type, ...)::Bool` and `Out(f, Arg1Type, Arg2Type)::ReturnType` which build upon an internal function `IsDef._return_type(f, Tuple{Arg1Type, Arg2Type, ...})::ReturnType`.
+It exports two functions for general usage `isdef(f, Arg1Type, Arg2Type, ...)::Bool` and `Out(f, Arg1Type, Arg2Type)::ReturnType` which build upon an internal function `IsDef.return_type(f, Tuple{Arg1Type, Arg2Type, ...})::ReturnType`.
 
 
 Use `isdef` / `Out` for your dispatch cases, but be aware that sometimes Julia's inference is only approximate.
 The package tries a lot to improve over the default inference, but there are still limitations.
 
 
-If you encounter limitations or too broad type-inference, you can always overload the underlying `_return_type`
+If you encounter limitations or too broad type-inference, you can always overload the underlying `return_type`
 ```julia
-IsDef._return_type(::typeof(myfunction), ::Type{Tuple{Arg1Type, Arg2Type}}) = ReturnType
+IsDef.return_type(::typeof(myfunction), ::Type{Tuple{Arg1Type, Arg2Type}}) = ReturnType
 ```
 Specifically, if you want to indicate that a given function is not defined for certain argument types, you return `Union{}`
 ```julia
 # Union{} denotes being undefined
-IsDef._return_type(::typeof(myfunction), ::Type{Tuple{Arg1Type, Arg2Type}}) = Union{}  
+IsDef.return_type(::typeof(myfunction), ::Type{Tuple{Arg1Type, Arg2Type}}) = Union{}  
 ```
 
 ## Installation & Import

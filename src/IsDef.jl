@@ -11,8 +11,17 @@ The only exception is Any, for which `isdef` returns true only if given an abstr
 for a newtype of the abstract type. (E.g. ``f(a) = 1`` )
 """
 module IsDef
-export isdef, Out, NotApplicable, ∨
+export isdef, Out, NotApplicable, ∨, apply
 import InteractiveUtils
+
+
+"""
+just applies a given function to arguments and keyword arguments
+
+This little helper is crucial if you want to typeinfer
+when only knowing the function type instead of the function instance.
+"""
+@inline apply(f, args...; kwargs...) = f(args...; kwargs...)
 
 
 # alias for promote_type to deal with types more compact
@@ -40,17 +49,17 @@ val1 ∨ val2 = typeof(val1) ∨ typeof(val2)
 
 This works in compile time and hence can be used to optimize code.
 
-IMPORTANT: Overload ``IsDef._return_type`` if you experience unexpected behaviour for your types
+IMPORTANT: Overload ``IsDef.return_type`` if you experience unexpected behaviour for your types
 For instance to say that some call like ``myfunc(::Int, ::String)`` is not defined define the following
 ```julia
-function IsDef._return_type(::Typeof(myfunc), ::Type{Tuple{TypeArg1, TypeArg2}})
+function IsDef.return_type(::Typeof(myfunc), ::Type{Tuple{TypeArg1, TypeArg2}})
   Union{}  # return empty Union to indicate something is not defined
 end
 ```
 """
-function isdef(f, types::Vararg{<:Type})
-  signature_type = Tuple{types...}
-  !isbottom(_return_type(f, signature_type))
+function isdef(f::F, types::Vararg{<:Type}) where F
+  signature_type = Tuple{F, types...}
+  !isbottom(return_type(signature_type))
 end
 isdef(f, args...) = isdef(f, typeof.(args)...)
 
@@ -64,21 +73,20 @@ Returns ``Traits.NotApplicable`` if compiler notices that no Method can be found
 
 CAUTION: If ``Out(...) == Any``, still a MethodError might happen at runtime. This is due to incomplete type inference.
 
-SOLUTION: Overload ``IsDef._return_type`` if you experience unexpected behaviour for your types
+SOLUTION: Overload ``IsDef.return_type`` if you experience unexpected behaviour for your types
 For instance to say that some call like ``myfunc(::Int, ::String)`` is not defined define the following
 ```julia
-function IsDef._return_type(::typeof(myfunc), ::Type{Tuple{TypeArg1, TypeArg2}})
+function IsDef.return_type(::typeof(myfunc), ::Type{Tuple{TypeArg1, TypeArg2}})
   Union{}  # return empty Union to indicate something is not defined
 end
 ```
 """
-function Out(f, types::Vararg{<:Type})
-  signature_type = Tuple{types...}
-  outputtype = _return_type(f, signature_type)
+function Out(f::F, types::Vararg{<:Type}) where F
+  signature_type = Tuple{F, types...}
+  outputtype = return_type(signature_type)
   isbottom(outputtype) ? NotApplicable : outputtype
 end
 Out(f, args...) = Out(f, typeof.(args)...)
-
 
 """
   wrapper arround Julia's type inference
@@ -89,20 +97,22 @@ Returning ``Union{}`` is interpreted as ``MethodError``.
 
 It is used internally by both ``isdef`` and ``Out``.
 """
-function _return_type(f, types::Type{<:Tuple})
-  # TODO we cannot easily make _return_type be @generated because of the dependency to `f`,
-  # hence the ``newtype_signature`` and ``newtype_inverse`` are @generated for better type-inference support
-  # however for faster user-experience it probably would be good if _return_type as well as isdef and Out can be @generated
-  _map_return_type_over_Union(f, new_type_signature(types))
+@generated function return_type(::Type{Ts}) where {Ts <: Tuple}
+  _return_type(Type2Union(Ts))
 end
 
-function _map_return_type_over_Union(f, T::Union)
-  Union{new_type_inverse(Core.Compiler.return_type(f, T.a)), _map_return_type_over_Union(f, T.b)}
+function _return_type(T::Union)
+  Union{_return_type(T.a), _return_type(T.b)}
 end
-function _map_return_type_over_Union(f, T::Type)
-  new_type_inverse(Core.Compiler.return_type(f, T))
+function _return_type(T::Type)
+  Core.Compiler.return_type(apply, T)
 end
 
+"""
+if you want to infere the return type, but you only have the type if a function, and not its instance
+you can include it into the argument type Tuple on first position and just ommit the extra function argument
+"""
+return_type(f::F, types::Type{<:Tuple}) where F = return_type(apply, Tuple{F, types.parameters...})
 
 
 # generated functions for better typeinference
@@ -123,16 +133,6 @@ function _isbottom(T::Union)
   _isbottom(T.a) || _isbottom(T.b)
 end
 
-# without ``@generated`` the function does not type-infere in detail
-@generated function new_type_signature(::Type{T}) where T <: Tuple
-  _new_type_signature(T)
-end
-function _new_type_signature(::Type{T}) where T <: Tuple
-  alltypes = Base.uniontypes.(Type2Union.(T.parameters))
-  combinations = collect(Iterators.product(alltypes...))
-  Union{map(c -> Tuple{c...}, combinations)...}
-end
-
 
 # Helpers
 # =======
@@ -143,12 +143,24 @@ function split_unionall(T::UnionAll)
   S, [T.var; vars]
 end
 
-struct NewType end
-new_type_inverse(T::Type{NewType}) = Any
-new_type_inverse(T) = T
 
+# Some Types need to stay abstract because they have way too many subtypes
+Type2Union(T::Type{Any}) = Any
+leaftypes(::Type{Any}) = [Any]
+allsubtypes(::Type{Any}) = [Any]
 
-Type2Union(T::Type{Any}) = Any  # only Any is dealed with as open world
+Type2Union(T::Type{Function}) = Function
+leaftypes(::Type{Function}) = [Function]
+allsubtypes(::Type{Function}) = [Function]
+
+# Tuples{Union{...}} -> Union{Tuple{...}}
+function Type2Union(::Type{T}) where T <: Tuple
+  alltypes = Base.uniontypes.(Type2Union.(T.parameters))
+  combinations = collect(Iterators.product(alltypes...))
+  Union{map(c -> Tuple{c...}, combinations)...}
+end
+
+# Other Types can be mapped to the Union of their concrete subtypes
 function Type2Union(T)
   leaftypes_with_abstract_typevariables = leaftypes(T)
   # apparently the current typeinference already works super well if instead of a typevariable-upperbound
@@ -158,7 +170,7 @@ function Type2Union(T)
   plain_leaftypes = unionall_to_union.(leaftypes_with_abstract_typevariables)
   # TODO apparently julia's type-inference stops after a Union of three types with the approximate result ``Any``
   # that is of course not optimal...
-  # I guess best is to wait for a better solution and just overload the _return_type function with your specific needs
+  # I guess best is to wait for a better solution and just overload the return_type function with your specific needs
   Union{plain_leaftypes...}
 end
 
@@ -186,35 +198,65 @@ function unionall_to_union(type::UnionAll, dict::IdDict)
     if subtype === Any
       # in case of Any, we do not do anything practically
       newdict[type.var] = type.var
+      newbody = unionall_to_union(type.body, newdict)
+      UnionAll(type.var, type.body)  # rewrap into UnionAll
     else
       newdict[type.var] = subtype
+      unionall_to_union(type.body, newdict)
     end
-    unionall_to_union(type.body, newdict)
   end
   Union{recurse_with_new_dict.(subtypes)...}
 end
 
+function subtypes(T)
+  # InteractiveUtils.subtypes is super mighty in that it can already deal with UnionAll types
+  sub = InteractiveUtils.subtypes(T)
+  if length(sub) == 1 && sub[1] === T
+    # InteractiveUtils has a small bug that sometimes the  type is itself returned as a subtype
+    # which is in theory true, however leads to infinite recursion
+    []
+  else
+    sub
+  end
+end
 
-leaftypes(::Type{Any}) = [Any]
 function leaftypes(T)
-  # InteractiveUtils.subtypes is super mighty in that it can already deal with UnionAll types
-  subtypes = InteractiveUtils.subtypes(T)
-  if isempty(subtypes)
+  sub = subtypes(T)
+  if isempty(sub)
     [T]
   else
-    vcat((leaftypes(S) for S in subtypes)...)
+    vcat((leaftypes(S) for S in sub)...)
   end
 end
 
-allsubtypes(::Type{Any}) = [Any]
 function allsubtypes(T)
-  # InteractiveUtils.subtypes is super mighty in that it can already deal with UnionAll types
-  subtypes = InteractiveUtils.subtypes(T)
-  if isempty(subtypes)
+  sub = subtypes(T)
+  if isempty(sub)
     [T]
   else
-    vcat(T, (allsubtypes(S) for S in subtypes)...)
+    vcat(T, (allsubtypes(S) for S in sub)...)
   end
 end
 
+
+"""
+for some reasons the @generated macro triggers too early and leads Union{} for some types
+
+calling this macro will redefine the @generated functions accordingly so that new TypeDefinitions are properly included
+"""
+macro redefine_generated()
+  quote
+    @generated function IsDef.return_type(::Type{Ts}) where {Ts <: Tuple}
+      _return_type(Type2Union(Ts))
+    end
+    @generated function IsDef.isbottom(::Type{T}) where T
+      _isbottom(T)
+    end
+    nothing
+  end
+end
+
+function __init__()
+  @redefine_generated
+end
 end # module

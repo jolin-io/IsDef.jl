@@ -1,7 +1,7 @@
 name = "IsDef"
 uuid = "2704c575-34db-4e2b-9135-fc0075949e5a"
 authors = ["Sahm Stephan <stephan.sahm@gmx.de>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
