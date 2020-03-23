@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0]
+## [0.2.0] - 2020-03-23
 ### Changed
 - renamed ``IsDef._return_type`` to ``IsDef.return_type`` for analogy with `Core.Compiler.return_type`
 - `Function` is now dealt like `Any` in the sense that no attempt is made to break it down into subtypes
