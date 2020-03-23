@@ -29,7 +29,7 @@ f(a) = a + a
 @test !isdef(f, Vector{<:String})
 @test !isdef(f, Vector{<:AbstractString})
 
-@test isdef(map, typeof(x -> x+4), Array{<:Number, 3})
-@test !isdef(map, typeof(x -> x+4), Vector{String})
-@test !isdef(map, typeof(x -> x+4), Vector{AbstractString})
-@test !isdef(map, typeof(x -> x+4), Vector{<:AbstractString})
+@test isdef(Base.map, typeof(x -> x+4), Array{<:Number, 3})
+@test !isdef(Base.map, typeof(x -> x+4), Vector{String})
+@test !isdef(Base.map, typeof(x -> x+4), Vector{AbstractString})
+@test !isdef(Base.map, typeof(x -> x+4), Vector{<:AbstractString})

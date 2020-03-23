@@ -58,8 +58,8 @@ end
 ```
 """
 function isdef(f::F, types::Vararg{<:Type}) where F
-  signature_type = Tuple{F, types...}
-  !isbottom(return_type(signature_type))
+  signature_type = Tuple{types...}
+  !isbottom(return_type(f, signature_type))
 end
 isdef(f, args...) = isdef(f, typeof.(args)...)
 
@@ -82,8 +82,8 @@ end
 ```
 """
 function Out(f::F, types::Vararg{<:Type}) where F
-  signature_type = Tuple{F, types...}
-  outputtype = return_type(signature_type)
+  signature_type = Tuple{types...}
+  outputtype = return_type(f, signature_type)
   isbottom(outputtype) ? NotApplicable : outputtype
 end
 Out(f, args...) = Out(f, typeof.(args)...)
@@ -97,22 +97,22 @@ Returning ``Union{}`` is interpreted as ``MethodError``.
 
 It is used internally by both ``isdef`` and ``Out``.
 """
-@generated function return_type(::Type{Ts}) where {Ts <: Tuple}
-  _return_type(Type2Union(Ts))
+function return_type(f, ::Type{Ts}) where {Ts <: Tuple}
+  # TODO we tried making this expecting a full signature Type Tuple{functiontype, argstypes...}
+  # however that failed to generate correctly, concretely it returned a couple of Union{} for newly defined functions
+  # despite there was actually a return type
+  # regenerating the function worked, however it needed to be always regenerated...
+  # hence we fallback to generate Type2Union
+
+  _return_type(f, Type2Union(Ts))
 end
 
-function _return_type(T::Union)
-  Union{_return_type(T.a), _return_type(T.b)}
+function _return_type(f, T::Union)
+  Union{_return_type(f, T.a), _return_type(f, T.b)}
 end
-function _return_type(T::Type)
-  Core.Compiler.return_type(apply, T)
+function _return_type(f, T::Type)
+  Core.Compiler.return_type(f, T)
 end
-
-"""
-if you want to infere the return type, but you only have the type if a function, and not its instance
-you can include it into the argument type Tuple on first position and just ommit the extra function argument
-"""
-return_type(f::F, types::Type{<:Tuple}) where F = return_type(apply, Tuple{F, types.parameters...})
 
 
 # generated functions for better typeinference
@@ -154,14 +154,15 @@ leaftypes(::Type{Function}) = [Function]
 allsubtypes(::Type{Function}) = [Function]
 
 # Tuples{Union{...}} -> Union{Tuple{...}}
-function Type2Union(::Type{T}) where T <: Tuple
+@generated function Type2Union(::Type{T}) where T <: Tuple
   alltypes = Base.uniontypes.(Type2Union.(T.parameters))
   combinations = collect(Iterators.product(alltypes...))
   Union{map(c -> Tuple{c...}, combinations)...}
 end
 
 # Other Types can be mapped to the Union of their concrete subtypes
-function Type2Union(T)
+Type2Union(T::Union) = Union{Type2Union(T.a), Type2Union(T.b)}
+function Type2Union(::Type{T}) where T
   leaftypes_with_abstract_typevariables = leaftypes(T)
   # apparently the current typeinference already works super well if instead of a typevariable-upperbound
   # ``Vector{<: Number}``
@@ -173,7 +174,6 @@ function Type2Union(T)
   # I guess best is to wait for a better solution and just overload the return_type function with your specific needs
   Union{plain_leaftypes...}
 end
-
 
 unionall_to_union(type) = unionall_to_union(type, IdDict())
 unionall_to_union(any, dict) = any  # bytetypes in parameters
@@ -256,7 +256,4 @@ macro redefine_generated()
   end
 end
 
-function __init__()
-  @redefine_generated
-end
 end # module
