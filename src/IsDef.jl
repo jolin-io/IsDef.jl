@@ -123,15 +123,14 @@ isbottom(value) = false
 @generated function isbottom(::Type{T}) where T
   _isbottom(T)
 end
-function _isbottom(T::Type)
-  base = Base.unwrap_unionall(T)
-  any(base.parameters) do p
+
+function _isbottom(T::DataType)
+  any(T.parameters) do p
     isbottom(p)
   end
 end
-function _isbottom(T::Union)
-  _isbottom(T.a) || _isbottom(T.b)
-end
+_isbottom(T::UnionAll) = _isbottom(Base.unwrap_unionall(T))
+_isbottom(T::Union) = _isbottom(T.a) || _isbottom(T.b)
 
 
 # Helpers
@@ -143,15 +142,17 @@ function split_unionall(T::UnionAll)
   S, [T.var; vars]
 end
 
-
 # Some Types need to stay abstract because they have way too many subtypes
-Type2Union(T::Type{Any}) = Any
-leaftypes(::Type{Any}) = [Any]
-allsubtypes(::Type{Any}) = [Any]
+const DontTouchTypes = (Any, Function, Exception)
 
-Type2Union(T::Type{Function}) = Function
-leaftypes(::Type{Function}) = [Function]
-allsubtypes(::Type{Function}) = [Function]
+for type in DontTouchTypes
+  eval(quote
+    Type2Union(T::Type{$type}) = $type
+    leaftypes(::Type{$type}) = [$type]
+    allsubtypes(::Type{$type}) = [$type]
+  end)
+end
+
 
 # Tuples{Union{...}} -> Union{Tuple{...}}
 @generated function Type2Union(::Type{T}) where T <: Tuple
@@ -167,7 +168,7 @@ function Type2Union(::Type{T}) where T
   # apparently the current typeinference already works super well if instead of a typevariable-upperbound
   # ``Vector{<: Number}``
   # we just use the union
-  # ``Union{Vector{subtype1}, Vector{subtype2}, ... for subtypei in allsubtypes(Number)}``
+  # ``Union{Vector{subtype1}, Vector{subtype2}, ... for subtype in allsubtypes(Number)}``
   plain_leaftypes = unionall_to_union.(leaftypes_with_abstract_typevariables)
   # TODO apparently julia's type-inference stops after a Union of three types with the approximate result ``Any``
   # that is of course not optimal...
@@ -182,7 +183,10 @@ function unionall_to_union(typevar::TypeVar, dict::IdDict)
   # this should already be mapped in the dict
   dict[typevar]
 end
-function unionall_to_union(type::Type, dict::IdDict)
+function unionall_to_union(type::Union, dict::IdDict)
+  Union{unionall_to_union(type.a, dict), unionall_to_union(type.b, dict)}
+end
+function unionall_to_union(type::DataType, dict::IdDict)
   if isempty(type.parameters)
     type
   else
@@ -195,18 +199,26 @@ function unionall_to_union(type::UnionAll, dict::IdDict)
   subtypes = allsubtypes(type.var.ub)
   function recurse_with_new_dict(subtype)
     newdict = copy(dict)
-    if subtype === Any
+    if subtype in DontTouchTypes
       # in case of Any, we do not do anything practically
       newdict[type.var] = type.var
       newbody = unionall_to_union(type.body, newdict)
-      UnionAll(type.var, type.body)  # rewrap into UnionAll
+      _UnionAll(type.var, newbody) # rewrap into UnionAll
     else
       newdict[type.var] = subtype
       unionall_to_union(type.body, newdict)
+      # here the type.var was replaced by an actual type, hence the result is already a valid type and does not need to be rewrapped into UnionALl
     end
   end
   Union{recurse_with_new_dict.(subtypes)...}
 end
+
+# UnionAll of Unions have buggy behaviour currently
+# see https://github.com/JuliaLang/julia/issues/35910 for updates
+_UnionAll(typevar, type::Union) = Union{_UnionAll(typevar, type.a), _UnionAll(typevar, type.b)}
+_UnionAll(typevar, other) = UnionAll(typevar, other)
+
+
 
 function subtypes(T)
   # InteractiveUtils.subtypes is super mighty in that it can already deal with UnionAll types
