@@ -35,7 +35,7 @@ IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Union
 ## Loading IsDef
 
 Run
-```jldoctest global
+```julia
 using IsDef
 ```
 which makes `isdef` and `Out` available.
@@ -46,6 +46,7 @@ which makes `isdef` and `Out` available.
 `isdef` checks whether a given function is defined for subsequent argument-types
 
 ```jldoctest global
+julia> using Julia
 julia> isdef(+, Int, Int)
 true
 julia> isdef(-, AbstractFloat)
