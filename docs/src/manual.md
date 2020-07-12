@@ -32,21 +32,12 @@ Specifically, if you want to indicate that a given function is not defined for c
 IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Union{}  
 ```
 
-## Loading IsDef
-
-Run
-```julia
-using IsDef
-```
-which makes `isdef` and `Out` available.
-
-
 ## `isdef(f, ...)`
 
 `isdef` checks whether a given function is defined for subsequent argument-types
 
 ```jldoctest global
-julia> using Julia
+julia> using IsDef
 julia> isdef(+, Int, Int)
 true
 julia> isdef(-, AbstractFloat)
@@ -68,6 +59,7 @@ true
 
 `Out` follows the same syntax as `isdef` however instead of returning a Bool, it returns the actual inferred returntype.
 ```jldoctest global
+julia> using IsDef
 julia> Out(Base.map, typeof(string), Vector{Int})
 Vector{String}
 ```
