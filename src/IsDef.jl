@@ -12,6 +12,8 @@ for a newtype of the abstract type. (E.g. ``f(a) = 1`` )
 """
 module IsDef
 export isdef, Out, NotApplicable, ∨, apply
+
+using Compat
 import InteractiveUtils
 
 
@@ -21,7 +23,7 @@ just applies a given function to arguments and keyword arguments
 This little helper is crucial if you want to typeinfer
 when only knowing the function type instead of the function instance.
 """
-@inline apply(f, args...; kwargs...) = f(args...; kwargs...)
+apply(f, args...; kwargs...) = f(args...; kwargs...)
 
 
 # alias for promote_type to deal with types more compact
@@ -52,16 +54,26 @@ This works in compile time and hence can be used to optimize code.
 IMPORTANT: Overload ``IsDef.return_type`` if you experience unexpected behaviour for your types
 For instance to say that some call like ``myfunc(::Int, ::String)`` is not defined define the following
 ```julia
-function IsDef.return_type(::Typeof(myfunc), ::Type{Tuple{TypeArg1, TypeArg2}})
+function IsDef.return_type(::Type{Tuple{typeof(myfunc), TypeArg1, TypeArg2}})
   Union{}  # return empty Union to indicate something is not defined
 end
 ```
 """
-function isdef(f::F, types::Vararg{<:Type}) where F
+function isdef(f, types::Vararg{<:Type})
+  signature_type = Tuple{typeof(f), types...}
+  !isbottom(return_type(signature_type))
+end
+# we need to handle Type constructors specifically, as the typeof function forgets
+function isdef(f::Type{T}, types::Vararg{<:Type}) where T
+  signature_type = Tuple{Type{T}, types...}
+  !isbottom(return_type(signature_type))
+end
+function isdef(::typeof(apply), types::Vararg{<:Type})
   signature_type = Tuple{types...}
-  !isbottom(return_type(f, signature_type))
+  !isbottom(return_type(signature_type))
 end
 isdef(f, args...) = isdef(f, typeof.(args)...)
+
 
 
 struct NotApplicable end
@@ -74,16 +86,27 @@ Returns ``Traits.NotApplicable`` if compiler notices that no Method can be found
 CAUTION: If ``Out(...) == Any``, still a MethodError might happen at runtime. This is due to incomplete type inference.
 
 SOLUTION: Overload ``IsDef.return_type`` if you experience unexpected behaviour for your types
-For instance to say that some call like ``myfunc(::Int, ::String)`` is not defined define the following
+For instance to say that some call like ``myfunc(::Int, ::String)`` is not defined, then define the following
 ```julia
-function IsDef.return_type(::typeof(myfunc), ::Type{Tuple{TypeArg1, TypeArg2}})
+function IsDef.return_type(::Type{Tuple{typeof(myfunc), TypeArg1, TypeArg2}})
   Union{}  # return empty Union to indicate something is not defined
 end
 ```
 """
-function Out(f::F, types::Vararg{<:Type}) where F
+function Out(f, types::Vararg{<:Type})
+  signature_type = Tuple{typeof(f), types...}
+  outputtype = return_type(signature_type)
+  isbottom(outputtype) ? NotApplicable : outputtype
+end
+# we need to handle Type constructors specifically, as the typeof function forgets
+function Out(f::Type{T}, types::Vararg{<:Type}) where T
+  signature_type = Tuple{Type{T}, types...}
+  outputtype = return_type(signature_type)
+  isbottom(outputtype) ? NotApplicable : outputtype
+end
+function Out(::typeof(apply), types::Vararg{<:Type})
   signature_type = Tuple{types...}
-  outputtype = return_type(f, signature_type)
+  outputtype = return_type(signature_type)
   isbottom(outputtype) ? NotApplicable : outputtype
 end
 Out(f, args...) = Out(f, typeof.(args)...)
@@ -97,21 +120,41 @@ Returning ``Union{}`` is interpreted as ``MethodError``.
 
 It is used internally by both ``isdef`` and ``Out``.
 """
-function return_type(f, ::Type{Ts}) where {Ts <: Tuple}
-  # TODO we tried making this expecting a full signature Type Tuple{functiontype, argstypes...}
-  # however that failed to generate correctly, concretely it returned a couple of Union{} for newly defined functions
-  # despite there was actually a return type
-  # regenerating the function worked, however it needed to be always regenerated...
-  # hence we fallback to generate Type2Union
+# TODO we tried making this function the @generated one (and not Type2Union),
+# however we immediately get NotApplicable for the very first test
+# @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}
+return_type(::Type{Ts}) where {Ts <: Tuple} = _return_type(Type2Union(Ts))
 
-  _return_type(f, Type2Union(Ts))
+"""
+`_return_type` can either except
+- a Union (which may be created by Type2Union)
+_ or a Tuple (which will be the final call signature)
+
+Importantly, the semantics is that if at least one of the Union types infers Union{}
+then Union{} is inferred in total.
+"""
+function _return_type(T::Union)
+  A = _return_type(T.a)
+  B = _return_type(T.b)
+  A <: Union{} || B <: Union{} ? Union{} : Union{A, B}
 end
 
-function _return_type(f, T::Union)
-  Union{_return_type(f, T.a), _return_type(f, T.b)}
+# TODO we need to add another function layer as otherwise typeinference again fails...
+# The test which failed in all cases is ``@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}``
+# NOTE we cannot dispatch on Type{<:Tuple}, as this is more specific than Union, and we only have Union of Tuple,
+# hence the Union clause would never be called
+function _return_type(T::Type)
+  __return_type(Tuple{T})
 end
-function _return_type(f, T::Type)
-  Core.Compiler.return_type(f, T)
+# TODO for some unclarified and not yet minimized reason, the following function signature does not infere well
+# ``__return_type(::Type{T}) where T`` and hence neither ``__return_type(::Type{T}) where T <: Tuple``
+# apparently the Type{T} looses some information given by the value, by restricting to type-level only.
+# TODO restricting type to `Type{<:Tuple}` somehow looses typeinformation similarly
+# The test which failed in all cases is ``@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}``
+function __return_type(T::Type)
+  # TODO we need to workaround some surprising type inference issues. See https://github.com/JuliaLang/julia/issues/36626
+  apply_internal(full_call) = full_call[1](Base.tail(full_call)...)
+  Core.Compiler.return_type(apply_internal, T)
 end
 
 
@@ -156,6 +199,9 @@ end
 
 # Tuples{Union{...}} -> Union{Tuple{...}}
 @generated function Type2Union(::Type{T}) where T <: Tuple
+  _Type2Union_Tuple(T)
+end
+function _Type2Union_Tuple(T)
   alltypes = Base.uniontypes.(Type2Union.(T.parameters))
   combinations = collect(Iterators.product(alltypes...))
   Union{map(c -> Tuple{c...}, combinations)...}
@@ -258,9 +304,10 @@ calling this macro will redefine the @generated functions accordingly so that ne
 """
 macro redefine_generated()
   quote
-    @generated function IsDef.return_type(::Type{Ts}) where {Ts <: Tuple}
-      _return_type(Type2Union(Ts))
+    @generated function Type2Union(::Type{T}) where T <: Tuple
+      _Type2Union_Tuple(T)
     end
+
     @generated function IsDef.isbottom(::Type{T}) where T
       _isbottom(T)
     end
