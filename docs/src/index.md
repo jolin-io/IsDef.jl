@@ -17,7 +17,7 @@ pkg"add IsDef"
 ```
 
 After installation, use the package by simply
-```jldoctest global
+```julia
 using IsDef
 ```
 which makes `isdef` and `Out` available.

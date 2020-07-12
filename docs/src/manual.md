@@ -1,3 +1,7 @@
+```@meta
+CurrentModule = IsDef
+```
+
 # Manual
 
 This package provides primitives for dispatching on whether certain methods are implemented or not.
@@ -28,6 +32,13 @@ Specifically, if you want to indicate that a given function is not defined for c
 IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Union{}  
 ```
 
+## Loading IsDef
+
+Run
+```jldoctest global
+using IsDef
+```
+which makes `isdef` and `Out` available.
 
 
 ## `isdef(f, ...)`
