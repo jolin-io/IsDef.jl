@@ -1,6 +1,7 @@
 using IsDef
 using Test
 using Documenter
+import FunctionWrappers: FunctionWrapper
 
 @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}
 @test isdef(Base.reduce, typeof(+), Vector{<:Number})
@@ -39,4 +40,8 @@ f(a) = a + a
 @test !isdef(Base.map, typeof(x -> x+4), Vector{AbstractString})
 @test !isdef(Base.map, typeof(x -> x+4), Vector{<:AbstractString})
 
+# test documentation
 doctest(IsDef)
+@test Out(Base.map, typeof(string), Vector{Int}) == Vector{String}
+@test Out(Base.map, typeof(isodd), Vector{Int}) == Vector{Bool}
+@test Out(Base.map, FunctionWrapper{Bool, Tuple{Any}}, Vector{Int}) == Vector{Bool}

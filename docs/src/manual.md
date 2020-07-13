@@ -69,7 +69,8 @@ true
 ## `Out(f, ...)`
 
 `Out` follows the same syntax as `isdef` however instead of returning a Bool, it returns the actual inferred returntype.
-```jldoctest global
+<!-- surprisingly in julia nightly this no longer works, the output is instead "Vector{String} = Array{String,1}" -->
+```julia
 julia> Out(Base.map, typeof(string), Vector{Int})
 Array{String,1}
 ```
@@ -81,12 +82,14 @@ NotApplicable
 ```
 
 You can also do higher-order inference, e.g. when working with `Base.map`. Usually you would need a concrete function for its first argument, like
-```jldoctest global
+<!-- surprisingly in julia nightly this no longer works, the output is instead "Vector{Bool} = Array{Bool,1}" -->
+```julia
 julia> Out(Base.map, typeof(isodd), Vector{Int})
 Array{Bool,1}
 ```
 But thanks to the package ``FunctionWrappers`` you can define Function types also directly, without having a concrete function:
-```jldoctest global
+<!-- surprisingly in julia nightly this no longer works, the output is instead "Vector{Bool} = Array{Bool,1}" -->
+```julia
 julia> import FunctionWrappers: FunctionWrapper
 
 julia> Out(Base.map, FunctionWrapper{Bool, Tuple{Any}}, Vector{Int})
