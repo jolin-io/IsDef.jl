@@ -1,15 +1,3 @@
-"""
-To more easily dispatch on the availability of functions, this package offers two essential helpers:
-
-    `isdef(f, TypeArg1, TypeArg2, ...)` and `Out(f, TypeArg1, TypeArg2, ...)`
-
-Currently the implementation follows a closed-world semantics in that `isdef` will return true
-for a given abstract type, if the function is defined for all currently defined leaf types of that
-abstract type.
-
-The only exception is Any, for which `isdef` returns true only if given an abstract type, the function is defined
-for a newtype of the abstract type. (E.g. `f(a) = 1` )
-"""
 module IsDef
 export isdef, Out, NotApplicable, ∨, apply
 
@@ -30,9 +18,12 @@ apply(f, args...; kwargs...) = f(args...; kwargs...)
 # we choose the symbol for join `∨` because promote_type is kind of a maximum (in type-hierarchy, with Any being the top)
 # see https://en.wikipedia.org/wiki/Join_and_meet
 """
-`∨` (latex `\vee`) is alias for `promote_type`
+    TypeA ∨ TypeB = promote_type(TypeA, TypeB)
+    ∨(values...) = ∨(typeof.(values)...)
 
-when called on values, the values will be cast to types via use of `typeof` for convenience
+`∨` (latex `\vee`) is alias for `promote_type`.
+
+When called on values, the values will be cast to types via use of `typeof` for convenience.
 """
 function ∨ end
 T1::Type ∨ T2::Type = promote_type(T1, T2)
@@ -47,17 +38,33 @@ val1 ∨ val2 = typeof(val1) ∨ typeof(val2)
 
 
 """
-  checks whether the function is defined for the actual types or not
+    isdef(func, ArgType1, ArgType2, ...)::Bool
+    isdef(f, args...) = isdef(f, typeof.(args)...)
 
+Checks whether the function is defined for the actual types or not.
 This works in compile time and hence can be used to optimize code.
 
-IMPORTANT: Overload `IsDef.return_type` if you experience unexpected behaviour for your types
-For instance to say that some call like `myfunc(::Int, ::String)` is not defined define the following
-```julia
-function IsDef.return_type(::Type{Tuple{typeof(myfunc), TypeArg1, TypeArg2}})
-  Union{}  # return empty Union to indicate something is not defined
-end
-```
+When called on values, the values will be cast to types via use of `typeof` for convenience.
+
+!!! warning "CAUTION"
+    If `isdef(...) == true`, still a MethodError might happen at runtime. This is due to incomplete type inference.
+
+    SOLUTION: Overload `IsDef.return_type` if you experience unexpected behaviour for your types
+
+    For instance to say that some call like `myfunc(::Int, ::String)` is not defined, then define the following
+    ```julia
+    function IsDef.return_type(::Type{Tuple{typeof(myfunc), TypeArg1, TypeArg2}})
+      Union{}  # return empty Union to indicate something is not defined
+    end
+    ```
+
+Semantics
+---------
+The implementation follows a closed-world semantics in that `isdef` will return true
+for a given abstract type, if the function is defined for all currently defined leaf types of that
+abstract type.
+
+The only exceptions currently are `Any`, `Function`,  and `Exception`, for which `isdef` returns `true`.
 """
 function isdef(f, types::Vararg{<:Type})
   signature_type = Tuple{typeof(f), types...}
@@ -79,19 +86,29 @@ isdef(f, args...) = isdef(f, typeof.(args)...)
 struct NotApplicable end
 
 """
-  returns outputtype of function application
+    Out(func, ArgType1, ArgType2, ...)::ReturnType
+    Out(f, args...) = isdef(f, typeof.(args)...)
 
-Returns `Traits.NotApplicable` if compiler notices that no Method can be found
+Returns outputtype of function application. Returns `Traits.NotApplicable` if compiler notices that no Method can be
+found.
 
-CAUTION: If `Out(...) == Any`, still a MethodError might happen at runtime. This is due to incomplete type inference.
+When called on values, the values will be cast to types via use of `typeof` for convenience.
 
-SOLUTION: Overload `IsDef.return_type` if you experience unexpected behaviour for your types
-For instance to say that some call like `myfunc(::Int, ::String)` is not defined, then define the following
-```julia
-function IsDef.return_type(::Type{Tuple{typeof(myfunc), TypeArg1, TypeArg2}})
-  Union{}  # return empty Union to indicate something is not defined
-end
-```
+!!! warning "CAUTION"
+    If `Out(...) == Any`, still a MethodError might happen at runtime. This is due to incomplete type inference.
+
+    SOLUTION: Overload `IsDef.return_type` if you experience unexpected behaviour for your types
+
+    For instance to say that some call like `myfunc(::Int, ::String)` is not defined, then define the following
+    ```julia
+    function IsDef.return_type(::Type{Tuple{typeof(myfunc), TypeArg1, TypeArg2}})
+      Union{}  # return empty Union to indicate something is not defined
+    end
+    ```
+
+UnionAll types and abstract types are concretified to the Union of their existing subtypes, in order
+to improve type-inference. The only exceptions so far are `Any`, `Function` and `Exception`, as they have way too
+many subtypes to be of practical use.
 """
 function Out(f, types::Vararg{<:Type})
   signature_type = Tuple{typeof(f), types...}
@@ -114,11 +131,10 @@ Out(f, args...) = Out(f, typeof.(args)...)
 """
   wrapper arround Julia's type inference
 
-This should be overloaded if you want to fix certain wrong typeinferences for
-  your custom types.
-Returning `Union{}` is interpreted as `MethodError`.
-
+This should be overloaded if you want to fix certain wrong typeinferences for your custom types.
 It is used internally by both `isdef` and `Out`.
+
+Returning `Union{}` is interpreted as `MethodError`.
 """
 return_type(::Type{Ts}) where {Ts <: Tuple} = _return_type(Type2Union(Ts))
 # TODO we tried making this function the @generated one (and not Type2Union),
