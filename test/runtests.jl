@@ -3,7 +3,9 @@ using Test
 using Documenter
 import FunctionWrappers: FunctionWrapper
 
-function test_everything()
+macro test_everything()
+quote
+
     # test apply
     # ----------
 
@@ -56,7 +58,7 @@ function test_everything()
 
     # test values
     @test Out(sin, 1) == Float64
-    @test isdef(sin, 1) 
+    @test isdef(sin, 1)
 
 
     # test documentation
@@ -66,11 +68,15 @@ function test_everything()
     @test Out(Base.map, typeof(string), Vector{Int}) == Vector{String}
     @test Out(Base.map, typeof(isodd), Vector{Int}) == Vector{Bool}
     @test Out(Base.map, FunctionWrapper{Bool, Tuple{Any}}, Vector{Int}) == Vector{Bool}
+    
+end # quote
+end # macro
 
-end
+@test_everything
 
 
 # check that if we redefine the generated functions of the module, nothing breaks
 # ----------------------------
+
 IsDef.@redefine_generated
-test_everything()
+@test_everything
