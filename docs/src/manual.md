@@ -22,10 +22,10 @@ The package does a lot to improve over the default inference, but there are stil
 
 Accordingly, here some notes about safety:
 * `isdef` is usually safe to use, as you don't care about the specific return type. In the rare case that some function was actually not defined despite saying so, you will get a loud MethodError at runtime, precisely stating which method was not defined. Then you can fix the missing type-inference yourself by overloading `IsDef.return_type` (see below) and you are safe to go.
-* `Out` is definitely trickier, as here the precise type may matter. The recommendation is to use it only if you are fine with (1.), i.e. it is okay for you if you get a more general type in some cases.
+* `Out` is definitely trickier, as here the precise type may matter. The general recommendation is actually to not use this kind of custom type-inference at all, but instead always try to use values directly and let the compiler optimise the code instead. For more information see for example [this discourse discussion](https://discourse.julialang.org/t/promote-op-and-preallocating-result-of-linear-operators/11332/2) about the similar function `Base.promote_op`. Use `Out` only if you cannot do the same with values only, e.g. if you work with empty containers which don't have any values, or some fancy constructs relying on functions. In addition, make sure it is okay for your use-case that `Out` may return more general types in some cases. That should be enough for the warning.
 
 
-If you encounter limitations or too broad type-inference, you can always overload the underlying `return_type`
+If you encounter limitations or too broad type-inference, you can always overload the underlying `return_type`.
 ```julia
 IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = ReturnType
 ```
@@ -37,11 +37,10 @@ IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Union
 
 ## Loading IsDef
 
-Run
 ```julia
 using IsDef
 ```
-which makes `isdef` and `Out` available.
+makes `isdef` and `Out` available.
 
 
 ## `isdef(f, ...)`
@@ -127,7 +126,7 @@ false
 
 !!! warning "This only works with the `IsDef.apply`"
     A custom apply won't work
-    ```jldoctest global
+    ```julia
     isdef((f, args...) -> f(args...), typeof(identity), MyNewType)
     # output
     true

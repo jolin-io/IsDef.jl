@@ -2,11 +2,20 @@
 CurrentModule = IsDef
 ```
 
-# IsDef
+# Public API
 
 ```@index
 ```
 
-```@autodocs
-Modules = [IsDef]
+## Core
+```@docs
+isdef
+Out
+return_type
+```
+
+## Other helpers
+```@docs
+apply
+∨
 ```

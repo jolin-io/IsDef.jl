@@ -3,6 +3,15 @@ using Test
 using Documenter
 import FunctionWrappers: FunctionWrapper
 
+# test apply
+# ----------
+
+@test apply(reduce, +, [2,3], init=1) == reduce(+, [2,3], init=1)
+
+
+# test isdef/Out
+# --------------
+
 @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}
 @test isdef(Base.reduce, typeof(+), Vector{<:Number})
 
@@ -34,13 +43,22 @@ f(a) = a + a
 @test !isdef(f, Vector{<:String})
 @test !isdef(f, Vector{<:AbstractString})
 
-
 @test isdef(Base.map, typeof(x -> x+4), Array{<:Number, 3})
 @test !isdef(Base.map, typeof(x -> x+4), Vector{String})
 @test !isdef(Base.map, typeof(x -> x+4), Vector{AbstractString})
 @test !isdef(Base.map, typeof(x -> x+4), Vector{<:AbstractString})
 
+
+@test Out(Some, Int) == Some{Int}
+@test isdef(Some, Int)
+
+
 # test documentation
+# ------------------
+
+# check that if we redefine the generated functions of the module, nothing breaks
+IsDef.@redefine_generated
+
 doctest(IsDef)
 @test Out(Base.map, typeof(string), Vector{Int}) == Vector{String}
 @test Out(Base.map, typeof(isodd), Vector{Int}) == Vector{Bool}

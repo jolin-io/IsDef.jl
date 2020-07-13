@@ -120,10 +120,11 @@ Returning ``Union{}`` is interpreted as ``MethodError``.
 
 It is used internally by both ``isdef`` and ``Out``.
 """
+return_type(::Type{Ts}) where {Ts <: Tuple} = _return_type(Type2Union(Ts))
 # TODO we tried making this function the @generated one (and not Type2Union),
 # however we immediately get NotApplicable for the very first test
 # @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}
-return_type(::Type{Ts}) where {Ts <: Tuple} = _return_type(Type2Union(Ts))
+
 
 """
 `_return_type` can either except
