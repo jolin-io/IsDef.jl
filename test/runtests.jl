@@ -11,6 +11,10 @@ quote
 
     @test apply(reduce, +, [2,3], init=1) == reduce(+, [2,3], init=1)
 
+    # test ∨ \vee
+    # -----------
+
+    @test ∨(1, 2.0) == ∨(typeof(1), typeof(2.0)) == promote_type(typeof(1), typeof(2.0))
 
     # test isdef/Out
     # --------------
@@ -68,7 +72,7 @@ quote
     @test Out(Base.map, typeof(string), Vector{Int}) == Vector{String}
     @test Out(Base.map, typeof(isodd), Vector{Int}) == Vector{Bool}
     @test Out(Base.map, FunctionWrapper{Bool, Tuple{Any}}, Vector{Int}) == Vector{Bool}
-    
+
 end # quote
 end # macro
 

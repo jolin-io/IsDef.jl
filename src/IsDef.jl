@@ -17,7 +17,7 @@ apply(f, args...; kwargs...) = f(args...; kwargs...)
 # alias for promote_type to deal with types more compact
 # we choose the symbol for join `∨` because promote_type is kind of a maximum (in type-hierarchy, with Any being the top)
 # see https://en.wikipedia.org/wiki/Join_and_meet
-"""
+@doc raw"""
     TypeA ∨ TypeB = promote_type(TypeA, TypeB)
     ∨(values...) = ∨(typeof.(values)...)
 
