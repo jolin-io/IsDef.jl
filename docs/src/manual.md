@@ -1,5 +1,8 @@
 ```@meta
 CurrentModule = IsDef
+DocTestSetup = quote
+    using IsDef
+end
 ```
 
 # Manual
@@ -32,12 +35,20 @@ Specifically, if you want to indicate that a given function is not defined for c
 IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Union{}  
 ```
 
+## Loading IsDef
+
+Run
+```julia
+using IsDef
+```
+which makes `isdef` and `Out` available.
+
+
 ## `isdef(f, ...)`
 
 `isdef` checks whether a given function is defined for subsequent argument-types
 
 ```jldoctest global
-julia> using IsDef
 julia> isdef(+, Int, Int)
 true
 julia> isdef(-, AbstractFloat)
@@ -59,34 +70,35 @@ true
 
 `Out` follows the same syntax as `isdef` however instead of returning a Bool, it returns the actual inferred returntype.
 ```jldoctest global
-julia> using IsDef
 julia> Out(Base.map, typeof(string), Vector{Int})
-Vector{String}
+Array{String,1}
 ```
 
 If the function is not defined, it returns a special exported type `NotApplicable` (and not the standard convention `Union{}`). This ensures that `Out` can be used for dispatch.
 ```jldoctest global
 julia> Out(-, AbstractString)
-IsDef.NotApplicable
+NotApplicable
 ```
 
 You can also do higher-order inference, e.g. when working with `Base.map`. Usually you would need a concrete function for its first argument, like
 ```jldoctest global
 julia> Out(Base.map, typeof(isodd), Vector{Int})
-Array{Bool, 1}
+Array{Bool,1}
 ```
 But thanks to the package ``FunctionWrappers`` you can define Function types also directly, without having a concrete function:
 ```jldoctest global
 julia> import FunctionWrappers: FunctionWrapper
+
 julia> Out(Base.map, FunctionWrapper{Bool, Tuple{Any}}, Vector{Int})
-Vector{Bool}
+Array{Bool,1}
 ```
 
 --------------------------
 
 Be cautious about `Any`, as it will usually work for every function, resulting again in an ``Any``.
-```julia
-Out(-, Any)  # Any
+```jldoctest global
+julia> Out(-, Any)
+Any
 ```
 
 
@@ -106,8 +118,7 @@ struct MyNewType end
 IsDef.return_type(::Type{Tuple{typeof(identity), MyNewType}}) = Union{}
 isdef(apply, typeof(identity), MyNewType)
 
-# Output
-
+# output
 false
 ```
 
@@ -115,8 +126,10 @@ false
     A custom apply won't work
     ```jldoctest global
     isdef((f, args...) -> f(args...), typeof(identity), MyNewType)
-
     # output
-
     true
     ```
+
+```@meta
+DocTestSetup = nothing
+```

@@ -1,3 +1,4 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
 IsDef = "2704c575-34db-4e2b-9135-fc0075949e5a"
