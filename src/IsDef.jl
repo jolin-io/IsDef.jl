@@ -3,12 +3,12 @@ To more easily dispatch on the availability of functions, this package offers tw
 
     `isdef(f, TypeArg1, TypeArg2, ...)` and `Out(f, TypeArg1, TypeArg2, ...)`
 
-Currently the implementation follows a closed-world semantics in that ``isdef`` will return true
+Currently the implementation follows a closed-world semantics in that `isdef` will return true
 for a given abstract type, if the function is defined for all currently defined leaf types of that
 abstract type.
 
 The only exception is Any, for which `isdef` returns true only if given an abstract type, the function is defined
-for a newtype of the abstract type. (E.g. ``f(a) = 1`` )
+for a newtype of the abstract type. (E.g. `f(a) = 1` )
 """
 module IsDef
 export isdef, Out, NotApplicable, ∨, apply
@@ -27,10 +27,10 @@ apply(f, args...; kwargs...) = f(args...; kwargs...)
 
 
 # alias for promote_type to deal with types more compact
-# we choose the symbol for join ``∨`` because promote_type is kind of a maximum (in type-hierarchy, with Any being the top)
+# we choose the symbol for join `∨` because promote_type is kind of a maximum (in type-hierarchy, with Any being the top)
 # see https://en.wikipedia.org/wiki/Join_and_meet
 """
-`∨` (latex `\vee`) is alias for ``promote_type``
+`∨` (latex `\vee`) is alias for `promote_type`
 
 when called on values, the values will be cast to types via use of `typeof` for convenience
 """
@@ -51,8 +51,8 @@ val1 ∨ val2 = typeof(val1) ∨ typeof(val2)
 
 This works in compile time and hence can be used to optimize code.
 
-IMPORTANT: Overload ``IsDef.return_type`` if you experience unexpected behaviour for your types
-For instance to say that some call like ``myfunc(::Int, ::String)`` is not defined define the following
+IMPORTANT: Overload `IsDef.return_type` if you experience unexpected behaviour for your types
+For instance to say that some call like `myfunc(::Int, ::String)` is not defined define the following
 ```julia
 function IsDef.return_type(::Type{Tuple{typeof(myfunc), TypeArg1, TypeArg2}})
   Union{}  # return empty Union to indicate something is not defined
@@ -81,12 +81,12 @@ struct NotApplicable end
 """
   returns outputtype of function application
 
-Returns ``Traits.NotApplicable`` if compiler notices that no Method can be found
+Returns `Traits.NotApplicable` if compiler notices that no Method can be found
 
-CAUTION: If ``Out(...) == Any``, still a MethodError might happen at runtime. This is due to incomplete type inference.
+CAUTION: If `Out(...) == Any`, still a MethodError might happen at runtime. This is due to incomplete type inference.
 
-SOLUTION: Overload ``IsDef.return_type`` if you experience unexpected behaviour for your types
-For instance to say that some call like ``myfunc(::Int, ::String)`` is not defined, then define the following
+SOLUTION: Overload `IsDef.return_type` if you experience unexpected behaviour for your types
+For instance to say that some call like `myfunc(::Int, ::String)` is not defined, then define the following
 ```julia
 function IsDef.return_type(::Type{Tuple{typeof(myfunc), TypeArg1, TypeArg2}})
   Union{}  # return empty Union to indicate something is not defined
@@ -116,9 +116,9 @@ Out(f, args...) = Out(f, typeof.(args)...)
 
 This should be overloaded if you want to fix certain wrong typeinferences for
   your custom types.
-Returning ``Union{}`` is interpreted as ``MethodError``.
+Returning `Union{}` is interpreted as `MethodError`.
 
-It is used internally by both ``isdef`` and ``Out``.
+It is used internally by both `isdef` and `Out`.
 """
 return_type(::Type{Ts}) where {Ts <: Tuple} = _return_type(Type2Union(Ts))
 # TODO we tried making this function the @generated one (and not Type2Union),
@@ -141,17 +141,17 @@ function _return_type(T::Union)
 end
 
 # TODO we need to add another function layer as otherwise typeinference again fails...
-# The test which failed in all cases is ``@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}``
+# The test which failed in all cases is `@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}`
 # NOTE we cannot dispatch on Type{<:Tuple}, as this is more specific than Union, and we only have Union of Tuple,
 # hence the Union clause would never be called
 function _return_type(T::Type)
   __return_type(Tuple{T})
 end
 # TODO for some unclarified and not yet minimized reason, the following function signature does not infere well
-# ``__return_type(::Type{T}) where T`` and hence neither ``__return_type(::Type{T}) where T <: Tuple``
+# `__return_type(::Type{T}) where T` and hence neither `__return_type(::Type{T}) where T <: Tuple`
 # apparently the Type{T} looses some information given by the value, by restricting to type-level only.
 # TODO restricting type to `Type{<:Tuple}` somehow looses typeinformation similarly
-# The test which failed in all cases is ``@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}``
+# The test which failed in all cases is `@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}`
 function __return_type(T::Type)
   # TODO we need to workaround some surprising type inference issues. See https://github.com/JuliaLang/julia/issues/36626
   apply_internal(full_call) = full_call[1](Base.tail(full_call)...)
@@ -213,11 +213,11 @@ Type2Union(T::Union) = Union{Type2Union(T.a), Type2Union(T.b)}
 function Type2Union(::Type{T}) where T
   leaftypes_with_abstract_typevariables = leaftypes(T)
   # apparently the current typeinference already works super well if instead of a typevariable-upperbound
-  # ``Vector{<: Number}``
+  # `Vector{<: Number}`
   # we just use the union
-  # ``Union{Vector{subtype1}, Vector{subtype2}, ... for subtype in allsubtypes(Number)}``
+  # `Union{Vector{subtype1}, Vector{subtype2}, ... for subtype in allsubtypes(Number)}`
   plain_leaftypes = unionall_to_union.(leaftypes_with_abstract_typevariables)
-  # TODO apparently julia's type-inference stops after a Union of three types with the approximate result ``Any``
+  # TODO apparently julia's type-inference stops after a Union of three types with the approximate result `Any`
   # that is of course not optimal...
   # I guess best is to wait for a better solution and just overload the return_type function with your specific needs
   Union{plain_leaftypes...}

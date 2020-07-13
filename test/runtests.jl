@@ -20,7 +20,7 @@ import FunctionWrappers: FunctionWrapper
 # Base.promote_op(Base.reduce, typeof(+), Vector{String}) === Union{}
 
 
-# works transparent with wrappers (unlike Base.``which``)
+# works transparent with wrappers (unlike Base.`which`)
 wrapper(args...; kwargs...) = original(args...; kwargs...)
 original(a::Int, b::String) = true
 @test isdef(wrapper, Int, String)

@@ -58,7 +58,7 @@ julia> isdef(-, AbstractString)
 false
 ```
 
-Caution has to be taken for the type ``Any``. It is the only special case. It is interpreted as if type-inference was in-accurate, and the concrete values are actually something more specific than Any. This is why, ``Any`` always results in ``true``.
+Caution has to be taken for the type `Any`. It is the only special case. It is interpreted as if type-inference was in-accurate, and the concrete values are actually something more specific than Any. This is why, `Any` always results in `true`.
 
 ```jldoctest global
 julia> isdef(-, Any)
@@ -86,7 +86,7 @@ You can also do higher-order inference, e.g. when working with `Base.map`. Usual
 julia> Out(Base.map, typeof(isodd), Vector{Int})
 Array{Bool,1}
 ```
-But thanks to the package ``FunctionWrappers`` you can define Function types also directly, without having a concrete function:
+But thanks to the package `FunctionWrappers` you can define Function types also directly, without having a concrete function:
 <!-- surprisingly in julia nightly this no longer works, the output is instead "Vector{Bool} = Array{Bool,1}" -->
 ```julia
 julia> import FunctionWrappers: FunctionWrapper
@@ -97,7 +97,7 @@ Array{Bool,1}
 
 --------------------------
 
-Be cautious about `Any`, as it will usually work for every function, resulting again in an ``Any``.
+Be cautious about `Any`, as it will usually work for every function, resulting again in an `Any`.
 ```jldoctest global
 julia> Out(-, Any)
 Any
@@ -114,7 +114,7 @@ julia> Out(apply, typeof(sin), Int)
 Float64
 ```
 
-The implementation in the background actually ensures that this takes into account custom fixes of ``IsDef.return_type``, too.
+The implementation in the background actually ensures that this takes into account custom fixes of `IsDef.return_type`, too.
 ```jldoctest global
 struct MyNewType end
 IsDef.return_type(::Type{Tuple{typeof(identity), MyNewType}}) = Union{}
