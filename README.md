@@ -34,4 +34,4 @@ Specifically, if you want to indicate that a given function is not defined for c
 IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Union{}  
 ```
 
-For more details check out the [documentation manual](https://schlichtanders.github.io/IsDef.jl/dev/manual/).
+For more details check out the [documentation](https://schlichtanders.github.io/IsDef.jl/dev/).
