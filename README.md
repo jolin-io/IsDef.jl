@@ -28,10 +28,10 @@ If you encounter limitations or too broad type-inference, you can always overloa
 ```julia
 IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = ReturnType
 ```
-Specifically, if you want to indicate that a given function is not defined for certain argument types, you return `Union{}`
+Specifically, if you want to indicate that a given function is not defined for certain argument types, you return `IsDef.NotApplicable`
 ```julia
 # Union{} denotes being undefined
-IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Union{}  
+IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = NotApplicable  
 ```
 
 For more details check out the [documentation](https://schlichtanders.github.io/IsDef.jl/dev/).

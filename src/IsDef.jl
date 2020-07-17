@@ -36,6 +36,12 @@ val1 ∨ val2 = typeof(val1) ∨ typeof(val2)
 # Core Interface
 # ==============
 
+struct NotApplicable end
+# this will be overwritten below for certain types like Any
+isapplicable(type) = !(NotApplicable <: type)
+# despite NotApplicable <: Any, we interprete Any always as applicable
+isapplicable(::Type{Any}) = true
+
 
 """
     isdef(func, ArgType1, ArgType2, ...)::Bool
@@ -68,22 +74,19 @@ The only exceptions currently are `Any`, `Function`,  and `Exception`, for which
 """
 function isdef(f, types::Vararg{<:Type})
   signature_type = Tuple{typeof(f), types...}
-  !isbottom(return_type(signature_type))
+  isapplicable(return_type(signature_type))
 end
 # we need to handle Type constructors specifically, as the typeof function forgets
 function isdef(f::Type{T}, types::Vararg{<:Type}) where T
   signature_type = Tuple{Type{T}, types...}
-  !isbottom(return_type(signature_type))
+  isapplicable(return_type(signature_type))
 end
 function isdef(::typeof(apply), types::Vararg{<:Type})
   signature_type = Tuple{types...}
-  !isbottom(return_type(signature_type))
+  isapplicable(return_type(signature_type))
 end
 isdef(f, args...) = isdef(f, typeof.(args)...)
 
-
-
-struct NotApplicable end
 
 """
     Out(func, ArgType1, ArgType2, ...)::ReturnType
@@ -112,21 +115,22 @@ many subtypes to be of practical use.
 """
 function Out(f, types::Vararg{<:Type})
   signature_type = Tuple{typeof(f), types...}
-  outputtype = return_type(signature_type)
-  isbottom(outputtype) ? NotApplicable : outputtype
+  return_type(signature_type)
 end
 # we need to handle Type constructors specifically, as the typeof function forgets
 function Out(f::Type{T}, types::Vararg{<:Type}) where T
   signature_type = Tuple{Type{T}, types...}
-  outputtype = return_type(signature_type)
-  isbottom(outputtype) ? NotApplicable : outputtype
+  return_type(signature_type)
 end
 function Out(::typeof(apply), types::Vararg{<:Type})
   signature_type = Tuple{types...}
-  outputtype = return_type(signature_type)
-  isbottom(outputtype) ? NotApplicable : outputtype
+  return_type(signature_type)
 end
 Out(f, args...) = Out(f, typeof.(args)...)
+
+
+# Core Background
+# ===============
 
 """
   wrapper arround Julia's type inference
@@ -136,47 +140,57 @@ It is used internally by both `isdef` and `Out`.
 
 Returning `Union{}` is interpreted as `MethodError`.
 """
-return_type(::Type{Ts}) where {Ts <: Tuple} = _return_type(Type2Union(Ts))
-# TODO we tried making this function the @generated one (and not Type2Union),
+return_type(::Type{Ts}) where {Ts <: Tuple} = core_return_type(abstracttype_to_list_of_concretetypes(Ts))
+# TODO we tried making this function the @generated one (and not abstracttype_to_list_of_concretetypes),
 # however we immediately get NotApplicable for the very first test
 # @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}
 
-
 """
-`_return_type` can either except
-- a Union (which may be created by Type2Union)
-_ or a Tuple (which will be the final call signature)
+`core_return_type` can either except
+- a Union (which may resolved type-wise)
+- or a Tuple-Type (which will be the final call signature)
 
-Importantly, the semantics is that if at least one of the Union types infers Union{}
-then Union{} is inferred in total.
+When something fails, it won't return `Union{}` (or `Array{Union{}, 1}`), but `NotApplicable`.
+This also simplifies the Union part, as Union{} would simply disappear as soon as put into Union{args...}.
+A `NotApplicable` will stay.
 """
-function _return_type(T::Union)
-  A = _return_type(T.a)
-  B = _return_type(T.b)
-  A <: Union{} || B <: Union{} ? Union{} : Union{A, B}
+function core_return_type(T::Union)
+  Union{core_return_type(T.a), core_return_type(T.b)}
 end
 
-# TODO we need to add another function layer as otherwise typeinference again fails...
-# The test which failed in all cases is `@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}`
 # NOTE we cannot dispatch on Type{<:Tuple}, as this is more specific than Union, and we only have Union of Tuple,
 # hence the Union clause would never be called
-function _return_type(T::Type)
-  __return_type(Tuple{T})
+# TODO we need to add another function layer as otherwise typeinference again fails...
+# The test which failed in all cases is `@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}`
+# TODO we need to forward Tuple{T} and cannot use Tuple{T} in the same function as Core.Compiler.return_type
+# Otherwise the meta test fails
+# Expression: Out(Out, typeof(Base.map), typeof((x->2x)), Vector{Int}) == Type{Vector{Int}}
+# Evaluated: DataType == Type{Array{Int64,1}}
+function core_return_type(T::Type)
+  _core_return_type(Tuple{T})
 end
+
 # TODO for some unclarified and not yet minimized reason, the following function signature does not infere well
-# `__return_type(::Type{T}) where T` and hence neither `__return_type(::Type{T}) where T <: Tuple`
+# `_core_return_type(::Type{T}) where T` and hence neither `_core_return_type(::Type{T}) where T <: Tuple`
 # apparently the Type{T} looses some information given by the value, by restricting to type-level only.
 # TODO restricting type to `Type{<:Tuple}` somehow looses typeinformation similarly
 # The test which failed in all cases is `@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}`
-function __return_type(T::Type)
+function _core_return_type(T::Type)
   # TODO we need to workaround some surprising type inference issues. See https://github.com/JuliaLang/julia/issues/36626
   apply_internal(full_call) = full_call[1](Base.tail(full_call)...)
-  Core.Compiler.return_type(apply_internal, T)
+  emptyunion_to_notapplicable(Core.Compiler.return_type(apply_internal, T))
 end
 
 
-# generated functions for better typeinference
-# ============================================
+# check whether a type means that there was an error
+# ==================================================
+
+emptyunion_to_notapplicable(::Type{Union{}}) = NotApplicable
+@generated function emptyunion_to_notapplicable(::Type{T}) where T
+  _emptyunion_to_notapplicable(T)
+end
+_emptyunion_to_notapplicable(T) = isbottom(T) ? NotApplicable : T
+
 
 isbottom(T::Type{Union{}}) = true
 isbottom(value) = false
@@ -192,15 +206,8 @@ end
 _isbottom(T::UnionAll) = _isbottom(Base.unwrap_unionall(T))
 _isbottom(T::Union) = _isbottom(T.a) || _isbottom(T.b)
 
-
 # Helpers
 # =======
-
-split_unionall(T) = T, []
-function split_unionall(T::UnionAll)
-  S, vars = split_unionall(T.body)
-  S, [T.var; vars]
-end
 
 # Some Types need to stay abstract because they have way too many subtypes
 const DontTouchTypes = (Any, Function, Exception)
@@ -215,10 +222,35 @@ end
 
 
 # Tuples{Union{...}} -> Union{Tuple{...}}
-@generated function Type2Union(::Type{T}) where T <: Tuple
-  _Type2Union_Tuple(T)
+# however we represent it as a tuple instead of a Union because this gives us better type inference
+# (we just tried it out to get to know)
+
+
+# we only generate the tuple version, as this is the entry point we need
+# all other Type2Union are just for recursion and nested types
+# but also bringing them @generated does not add much, hence we follow recommendations and leave them as functions
+"""
+takes a type like
+```
+Tuple{Int, AbstractFloat}
+```
+and returns Union
+```
+Union{
+  Tuple{Int, BigFloat},
+  Tuple{Int, Float16},
+  Tuple{Int, Float32},
+  Tuple{Int, Float64},
+}
+```
+"""
+@generated function abstracttype_to_list_of_concretetypes(::Type{T}) where T <: Tuple
+  _abstracttype_to_list_of_concretetypes(T)
 end
-function _Type2Union_Tuple(T)
+_abstracttype_to_list_of_concretetypes(T) = Type2Union(T)
+
+
+function Type2Union(::Type{T}) where T <: Tuple
   alltypes = Base.uniontypes.(Type2Union.(T.parameters))
   combinations = collect(Iterators.product(alltypes...))
   Union{map(c -> Tuple{c...}, combinations)...}
@@ -239,6 +271,7 @@ function Type2Union(::Type{T}) where T
   Union{plain_leaftypes...}
 end
 
+# TODO is it possible to combine Type2Union and unionall_to_union together? looks like it could be possible
 unionall_to_union(type) = unionall_to_union(type, IdDict())
 unionall_to_union(any, dict) = any  # bytetypes in parameters
 function unionall_to_union(typevar::TypeVar, dict::IdDict)
@@ -321,10 +354,12 @@ calling this macro will redefine the @generated functions accordingly so that ne
 """
 macro redefine_generated()
   quote
-    @generated function Type2Union(::Type{T}) where T <: Tuple
-      _Type2Union_Tuple(T)
+    @generated function abstracttype_to_list_of_concretetypes(::Type{T}) where T <: Tuple
+      _abstracttype_to_list_of_concretetypes(T)
     end
-
+    @generated function IsDef.emptyunion_to_notapplicable(::Type{T}) where T
+      _emptyunion_to_notapplicable(T)
+    end
     @generated function IsDef.isbottom(::Type{T}) where T
       _isbottom(T)
     end

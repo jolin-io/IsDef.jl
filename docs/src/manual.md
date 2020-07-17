@@ -31,8 +31,8 @@ IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Retur
 ```
 Specifically, if you want to indicate that a given function is not defined for certain argument types, you return `Union{}`
 ```julia
-# Union{} denotes being undefined
-IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Union{}  
+# NotApplicable denotes being undefined
+IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = NotApplicable  
 ```
 
 ## Loading IsDef
@@ -117,7 +117,7 @@ Float64
 The implementation in the background actually ensures that this takes into account custom fixes of `IsDef.return_type`, too.
 ```jldoctest global
 struct MyNewType end
-IsDef.return_type(::Type{Tuple{typeof(identity), MyNewType}}) = Union{}
+IsDef.return_type(::Type{Tuple{typeof(identity), MyNewType}}) = NotApplicable
 isdef(apply, typeof(identity), MyNewType)
 
 # output

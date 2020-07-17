@@ -4,7 +4,7 @@ using Documenter
 import FunctionWrappers: FunctionWrapper
 
 macro test_everything()
-quote
+  quote
 
     # test apply
     # ----------
@@ -19,7 +19,7 @@ quote
     # test isdef/Out
     # --------------
 
-    @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}
+    @test IsDef.Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}
     @test isdef(Base.reduce, typeof(+), Vector{<:Number})
 
     # Caution!! Core.Compiler.return_type is actually not always as good as expected:
@@ -32,6 +32,7 @@ quote
     original(a::Int, b::String) = true
     @test isdef(wrapper, Int, String)
     @test !isdef(wrapper, Float64)
+
 
 
     # does even work on compiler level
@@ -65,6 +66,31 @@ quote
     @test isdef(sin, 1)
 
 
+    # test inference
+    # --------------
+
+    @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(sin), Int) == Val{true}
+
+    using IsDef
+    using Test
+    mywrapper(args...) = myfunc(args...)
+    myfunc(::BigFloat) = "big"
+    myfunc(::Float16) = 16
+    myfunc(::Float32) = 32
+    @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), Float64) == Val{false}
+    @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), BigFloat) == Val{true}
+    @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), Float16) == Val{true}
+    @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), Float32) == Val{true}
+
+    # TODO unfortunately type inference does not work through Union, which is surprising
+    # inspecting the issue further it turns out that type-inference is extremely unstable, putting things into functions
+    # instead of doing them at the REPL may influence type-inference to the worse...
+    # better not to do much with type-inference
+    
+    # @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), AbstractFloat) == Val{false}
+
+
+
     # test documentation
     # ------------------
 
@@ -73,7 +99,7 @@ quote
     @test Out(Base.map, typeof(isodd), Vector{Int}) == Vector{Bool}
     @test Out(Base.map, FunctionWrapper{Bool, Tuple{Any}}, Vector{Int}) == Vector{Bool}
 
-end # quote
+  end # quote
 end # macro
 
 @test_everything
