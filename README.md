@@ -35,3 +35,18 @@ IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = NotAp
 ```
 
 For more details check out the [documentation](https://schlichtanders.github.io/IsDef.jl/dev/).
+
+## Installation
+
+```julia
+using Pkg
+pkg"registry add https://github.com/JuliaRegistries/General"  # central julia repository
+pkg"registry add https://github.com/schlichtanders/SchlichtandersJuliaRegistry.jl"  # custom repository
+pkg"add IsDef"
+```
+
+After installation, use the package by simply
+```julia
+using IsDef
+```
+which makes `isdef` and `Out` available.
