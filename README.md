@@ -40,8 +40,8 @@ For more details check out the [documentation](https://schlichtanders.github.io/
 
 ```julia
 using Pkg
-pkg"registry add https://github.com/JuliaRegistries/General"  # central julia repository
-pkg"registry add https://github.com/schlichtanders/SchlichtandersJuliaRegistry.jl"  # custom repository
+pkg"registry add https://github.com/JuliaRegistries/General"  # central julia registry
+pkg"registry add https://github.com/schlichtanders/SchlichtandersJuliaRegistry.jl"  # custom registry
 pkg"add IsDef"
 ```
 

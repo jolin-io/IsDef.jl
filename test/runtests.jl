@@ -3,6 +3,8 @@ using Test
 using Documenter
 import FunctionWrappers: FunctionWrapper
 
+@test isempty(detect_ambiguities(IsDef))
+
 macro test_everything()
   quote
 
@@ -86,7 +88,7 @@ macro test_everything()
     # inspecting the issue further it turns out that type-inference is extremely unstable, putting things into functions
     # instead of doing them at the REPL may influence type-inference to the worse...
     # better not to do much with type-inference
-    
+
     # @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), AbstractFloat) == Val{false}
 
 
