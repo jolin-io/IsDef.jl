@@ -1,3 +1,5 @@
+TODO how to translate if-else functions to TypeLevel?
+
 # IsDef.jl
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://schlichtanders.github.io/IsDef.jl/stable)
