@@ -20,4 +20,5 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/schlichtanders/IsDef.jl",
+    devbranch="main",
 )
