@@ -1,6 +1,6 @@
 
-Out(::Type{<:Tuple{typeof(*), Vararg{T}}}) where T = T
-Out(::Type{<:Tuple{typeof(+), Vararg{T}}}) where T = T
+Out(::Type{<:Tuple{Union{typeof(+), typeof(-), typeof(*), typeof(/)}, Vararg{T}}}) where T = T
+Out(::Type{<:Tuple{Union{typeof(<), typeof(>), typeof(<=), typeof(>=)}, S, T}}) where {S, T} = Bool
 
 function Out(sigtype::Type{Tuple{typeof(promote_type), T1, T2}}) where {T1, T2}
   hassignature(sigtype) || return NotApplicable
@@ -31,6 +31,15 @@ function Out(sigtype::Type{Tuple{typeof(typeof), T}}) where T
   # As Out works on type-level, we can just return the type-level as the result of typeof
   Type{T}
 end
+
+function Out(::Type{Tuple{typeof(typeassert), Value, ValueType}}) where {Value, ValueType}
+  if Value isa ValueType
+    Nothing
+  else
+    NotApplicable  # TODO this usually throws an error, so we should also throw an error... Maybe NotApplicable should be implemented as error? Don't know how well this would type-infer.
+  end
+end
+
 
 # methods which need a value-level implementation
 # ===============================================
@@ -68,39 +77,26 @@ typedgetfield(x, ::Val{field}) where {field} = getfield(x, field)
 # --------
 
 function _Out_TypeLevel(::typeof(isa), instance, type)
-  
+  # TODO
+  mark_as_typelevel(Bool)
 end
 
 
 # Core.apply_type
 # ---------------
 
+
+ensure_type_or_bits(T::Type) = T 
+ensure_type_or_bits(T::TypeLevel) = T.value
+ensure_type_or_bits(other) = isbits(other) ? other : error("tryed to create new type with Typevariable which is neither a Type nor bits. Got `$other`.")
+
 # needs value-level because there may be byte-values in the type signature (like Array{Int, 2})
-
 function _Out_TypeLevel(::typeof(Core.apply_type), T, typeargs...)
-  
-  function convert_to_type(other)
-    if other isa Type || isbits(other)
-      other
-    else
-      error("tryed to create new type with Typevariable which is neither a Type nor bits. Gor `$other`.")
-    end
-  end
-  function convert_to_type(T::TypeLevel)
-    if isdefined(T.value, :parameters) && length(T.value.parameters) == 1
-      # assuming TypeLevel T to be a wrapper around Type{YourType}
-      T.value.parameters[1]
-    else
-      # in other cases, we don't know what todo and fallback to where 
-      TypeVar(gensym(:T))
-    end
-  end
-
-  T′ = convert_to_type(T)
+  T′ = ensure_type_or_bits(T)
   if T isa TypeLevel && T′ isa TypeVar
     error("assuming TypeLevel T to be a wrapper around Type{YourType}, but got `$(T.value)`")
   end
-  typeargs′ = convert_to_type.(typeargs)
+  typeargs′ = ensure_type_or_bits.(typeargs)
   wheres = filter(x -> x isa TypeVar, typeargs′)
   @show T′ typeargs′ wheres
   type = if isempty(wheres)

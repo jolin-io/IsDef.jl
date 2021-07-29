@@ -70,7 +70,7 @@ end
     Out(func, ArgType1, ArgType2, ...)::ReturnType
     Out(f, args...) = isdef(f, typeof.(args)...)
 
-Returns outputtype of function application. Returns `Traits.NotApplicable` if compiler notices that no Method can be
+Returns outputtype of function application. Returns `IsDef.NotApplicable` if compiler notices that no Method can be
 found.
 
 When called on values, the values will be cast to types via use of `typeof` for convenience.
@@ -91,7 +91,7 @@ UnionAll types and abstract types are concretified to the Union of their existin
 to improve type-inference. The only exceptions so far are `Any`, `Function` and `Exception`, as they have way too
 many subtypes to be of practical use.
 """
-Out(f, args...) = Out(f, typeof.(args)...)
+Out(f, args...) = Out(f, Core.Typeof.(args)...)
 function Out(f, types::Vararg{<:Type})
   Out(apply, Core.Typeof(f), types...)
 end
