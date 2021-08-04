@@ -1,5 +1,5 @@
 module IsDef
-export isdef, Out, NotApplicable, isapplicable, apply
+export isdef, Out, NotApplicable, NotApplicableError, isapplicable, apply
 
 using Compat
 using IRTools
@@ -21,11 +21,18 @@ apply(f, args...; kwargs...) = f(args...; kwargs...)
 # Core Interface
 # ==============
 
-struct NotApplicable end
-isapplicable(::NotApplicable) = false
+# we decided to use type-level because `Out` normally returns types.
+# hence it is more intuitive to use type, but also more natural, as `Out` may be used within type range as `Out(f, ...) <: NotApplicable`.
+struct NotApplicable
+  NotApplicable() = error("Please use `NotApplicable` type instead of `NotApplicable()` instance.")
+end
+
+struct NotApplicableError
+  NotApplicableError() = error("Please use `NotApplicableError` type instead of `NotApplicableError()` instance.")
+end
+
 isapplicable(::Type{NotApplicable}) = false
 isapplicable(other) = true
-
 
 """
     isdef(func, ArgType1, ArgType2, ...)::Bool
@@ -68,7 +75,7 @@ end
 
 """
     Out(func, ArgType1, ArgType2, ...)::ReturnType
-    Out(f, args...) = isdef(f, typeof.(args)...)
+    Out′(f, args...) = Out(f, typeof.(args)...)
 
 Returns outputtype of function application. Returns `IsDef.NotApplicable` if compiler notices that no Method can be
 found.
@@ -91,14 +98,19 @@ UnionAll types and abstract types are concretified to the Union of their existin
 to improve type-inference. The only exceptions so far are `Any`, `Function` and `Exception`, as they have way too
 many subtypes to be of practical use.
 """
-Out(f, args...) = Out(f, Core.Typeof.(args)...)
-function Out(f, types::Vararg{<:Type})
-  Out(apply, Core.Typeof(f), types...)
+Out(f, types::Vararg{Type, N}; kwtypes...) where {N} = Out(apply, Core.Typeof(f), types...; kwtypes...)
+function Out(::typeof(apply), types::Vararg{Type, N}; kwtypes...) where {N}
+  signature_type = Tuple_value_to_type(types)
+  kw_type = NamedTuple_value_to_type(kwtypes.data)
+  Out(signature_type, kw_type)
 end
-function Out(::typeof(apply), types::Vararg{<:Type})
-  signature_type = Tuple{types...}
-  Out(signature_type)
-end
+# default to empty keywords type for convenience
+Out(::Type{T}) where T<:Tuple = Out(T, NamedTupleEmpty)
+
+
+# we support the all value version extra in order to not accidentily confuse the keyword argument usage
+Out′(f, args::Vararg{Any, N}; kwargs...) where N = Out(f, map(Core.Typeof, args)...; map(Core.Typeof, kwargs.data)...)
+
 
 
 # Further Details

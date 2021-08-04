@@ -3,7 +3,7 @@ using Test
 # using Documenter
 import FunctionWrappers: FunctionWrapper
 
-@test isempty(detect_ambiguities(IsDef))
+# @test isempty(detect_ambiguities(IsDef))  # crashes whole Julia
 
 
 # test apply
@@ -15,12 +15,11 @@ import FunctionWrappers: FunctionWrapper
 # test isdef/Out
 # --------------
 
-@test Out(x -> 2x, Int) == Int
-@test Out(x -> 2.3x, Int) == Float64
-
+@test @inferred(Out(x -> 2x, Int)) == Int
+@test @inferred(Out(x -> 2.3x, Int)) == Float64
 
 # TODO
-Out(Base.map, identity, Vector{Int})
+Out(Base.map, typeof(identity), Vector{Int})
 
 @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}  # TODO continue with Out(typeof)
 

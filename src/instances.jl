@@ -1,111 +1,177 @@
 
-Out(::Type{<:Tuple{Union{typeof(+), typeof(-), typeof(*), typeof(/)}, Vararg{T}}}) where T = T
-Out(::Type{<:Tuple{Union{typeof(<), typeof(>), typeof(<=), typeof(>=)}, S, T}}) where {S, T} = Bool
+Out(signature::Type{<:Tuple{Union{typeof(+), typeof(-), typeof(*), typeof(/)}, T1, T2}},
+    kw::Type{NamedTupleEmpty}) where {T1, T2} = promote_types_or_bits(T1, T2)
+Out(signature::Type{<:Tuple{Union{typeof(+), typeof(-), typeof(*), typeof(/)}, Vararg{T}}},
+    kw::Type{NamedTupleEmpty}) where T = T
 
-function Out(sigtype::Type{Tuple{typeof(promote_type), T1, T2}}) where {T1, T2}
-  hassignature(sigtype) || return NotApplicable
-  @assert length(T1.parameters) == 1 "expecting `Type{T}`-like parameters, got `$T1`"
-  @assert length(T2.parameters) == 1 "expecting `Type{T}`-like parameters, got `$T2`"
-  Core.Typeof(promote_type(T1.parameters[1], T2.parameters[1]))
+function Out(signature::Type{<:Tuple{F, T1, T2}},
+             kw::Type{NamedTupleEmpty}) where {F <: Union{typeof(<), typeof(>), typeof(<=), typeof(>=)}, T1, T2}
+  _Out_comparison(F, wrap_bits_into_Val(T1), wrap_bits_into_Val(T2))
+end
+@generated function _Out_comparison(::Type{F}, ::Val{T1}, ::Val{T2}) where {F, T1, T2}
+  F.instance(T1, T2) 
+end
+_Out_comparison(::Type, ::Type, ::Type) = Bool
+
+function Out(signature::Type{Tuple{typeof(promote_type), Type{T1}, Type{T2}}}, kw::Type{NamedTupleEmpty}) where {T1, T2}
+  hassignature(signature) || return NotApplicable  # TODO: we are assuming that if there is a method, it also works
+  Core.Typeof(promote_type(T1, T2))
 end
 
-function Out(sigtype::Type{Tuple{typeof(convert), T1, T2}}) where {T1, T2}
-  hassignature(sigtype) || return NotApplicable  # IMPORTANT: we are assuming that if there is a method, it also works
-  @assert length(T1.parameters) == 1 "expecting `Type{T}`-like parameters, got `$T1`"
-  T1.parameters[1]
+function Out(signature::Type{Tuple{typeof(convert), Type{T1}, T2}}, kw::Type{NamedTupleEmpty}) where {T1, T2}
+  hassignature(signature) || return NotApplicable  # TODO: we are assuming that if there is a method, it also works
+  T1
 end
 
-tail_args(first, rest...) = rest
-
-function Out(sigtype::Type{<:Tuple{typeof(tuple), Vararg}})
-  Tuple{tail_args(sigtype.parameters...)...}
+function Out(signature::Type{<:Tuple{typeof(tuple), Vararg}}, kw::Type{NamedTupleEmpty})
+  _, tupletype = signature_split_first(signature)
+  tupletype
 end
 
-function Out(sigtype::Type{Tuple{typeof(Core._apply_iterate), typeof(iterate), Func, TupleArgs}}) where {Func, TupleArgs}
+# TODO somehow the call syntax is not completely clear
+
+raw"""
+Core._apply_iterate implements the splatting syntax `...`
+```
+julia> function f(a)
+         b = map(identity, a)
+         tuple(b..., 42,  b..., keyword = 3, key2 = "hi")
+       end
+f (generic function with 1 method)
+
+julia> @code_ir f([1,2])
+1: (%1, %2)
+  %3 = Main.map(Main.identity, %2)
+  %4 = (:keyword, :key2)
+  %5 = Core.apply_type(Core.NamedTuple, %4)
+  %6 = Core.tuple(3, "hi")
+  %7 = (%5)(%6)
+  %8 = Core.kwfunc(Main.tuple)
+  %9 = Core.tuple(%7, Main.tuple)
+  %10 = Core.tuple(42)
+  %11 = Core._apply_iterate(Base.iterate, %8, %9, %3, %10, %3)
+  return %11
+```
+""" # TODO deal with all cases
+# TODO IMPORTANT deal with Core.kwfunc and revise the use of keywords
+function Out(::Type{Signature}, kw::Type{NamedTupleEmpty}) where {Func, Signature <: Tuple{typeof(Core._apply_iterate), typeof(iterate), Func, Vararg}}
   # `func(mytuple...)` is translated to `Core._apply_iterate(iterate, func, mytuple)`
   # similarly we translate the typeinference
-  Out(Tuple{Func, TupleArgs.parameters...})
+  _apply_iterate, rest1 = signature_split_first(Signature)
+  _iterate, rest2 = signature_split_first(rest1)
+  _func, args = signature_split_first(rest2)
+  Core.println("func = $Func, args = $args")
+
+  map(convertTuple_type_to_value(args))
+  Out(Tuple{Func, TupleArgs})
 end
 
-function Out(sigtype::Type{Tuple{typeof(typeof), T}}) where T
+
+function Out(::Type{Signature}, kw::Type{NamedTupleEmpty}) where {Func, Signature <: Tuple{typeof(Core._apply_iterate), typeof(iterate), Func, Vararg}}
+  # `func(mytuple...)` is translated to `Core._apply_iterate(iterate, func, mytuple)`
+  # similarly we translate the typeinference
+  _apply_iterate, rest1 = signature_split_first(Signature)
+  _iterate, rest2 = signature_split_first(rest1)
+  _func, args = signature_split_first(rest2)
+  Core.println("func = $Func, args = $args")
+
+  map(convertTuple_type_to_value(args))
+  Out(Tuple{Func, TupleArgs})
+end
+
+function Out(signature::Type{Tuple{typeof(typeof), T}}, kw::Type{NamedTupleEmpty}) where T
   # As Out works on type-level, we can just return the type-level as the result of typeof
   Type{T}
 end
 
-function Out(::Type{Tuple{typeof(typeassert), Value, ValueType}}) where {Value, ValueType}
-  if Value isa ValueType
-    Nothing
-  else
-    NotApplicable  # TODO this usually throws an error, so we should also throw an error... Maybe NotApplicable should be implemented as error? Don't know how well this would type-infer.
-  end
+function Out(signature::Type{Tuple{typeof(typeassert), Value, ValueType}}, kw::Type{NamedTupleEmpty}) where {Value, ValueType}
+  Value isa ValueType || NotApplicableError
 end
 
 
-# methods which need a value-level implementation
-# ===============================================
 
 # getfield
 # --------
-"""
-```julia
-julia> IsDef._Out_TypeLevel(getfield, IsDef.TypeLevel(Tuple{Int, String}), 1)
-IsDef.TypeLevel{Type{Int64}}(Int64)
 
-julia> IsDef._Out_TypeLevel(getfield, IsDef.TypeLevel.(Tuple{Int, String}), 1)
-IsDef.TypeLevel{Type{Int64}}(Int64)
-
-julia> IsDef._Out_TypeLevel(getfield, IsDef.TypeLevel.((Int, String)), 1)
-IsDef.TypeLevel{Type{Int64}}(Int64)
-```
-"""
-@inline function _Out_TypeLevel(::typeof(getfield), T, field)
-  mark_as_typelevel(getfield(T, field))
+function Out(signature::Type{Tuple{typeof(getfield), Typ, Field}}, kw::Type{NamedTupleEmpty}) where {Typ, Field}
+  if Field isa Type
+    Core.Compiler.return_type(getfield, Tuple{Typ, Field})
+  else  # Field is a bits  
+    # while this does not work with anonymous functions, type-inference indeed works with this little helper
+    Core.Compiler.return_type(typedgetfield, Tuple{Typ, Val{Field}})
+  end
 end
-@inline function _Out_TypeLevel(::typeof(getfield), T::TypeLevel, field)
-  mark_as_typelevel(Core.Compiler.return_type(typedgetfield, Tuple{T.value, Val{field}}))
-end
-@inline function _Out_TypeLevel(::typeof(getfield), T::TypeLevel, field::TypeLevel)
-  # Caution this returns a Union
-  mark_as_typelevel(Core.Compiler.return_type(typedgetfield, Tuple{T.value, Val}))
-end
-# while this does not work with anonymous functions, type-inference indeed works with this little helper
 typedgetfield(x, ::Val{field}) where {field} = getfield(x, field)
-
 
 
 # Core.isa
 # --------
 
-function _Out_TypeLevel(::typeof(isa), instance, type)
-  # TODO
-  mark_as_typelevel(Bool)
-end
+Out(signature::Type{Tuple{typeof(isa), Instance, Typ}}, kw::Type{NamedTupleEmpty}) where {Instance, Typ} = _Out_isa(Instance, Typ)
+
+_Out_isa(::Type{Instance}, ::Type{Type{UpperBound}}) where {Instance, UpperBound} = Instance <: UpperBound
+_Out_isa(::Type{Instance}, ::Type{Typ}) where {Instance, Typ} = Instance isa Typ
+_Out_isa(::IsBits, ::Type{Type{UpperBound}}) where {IsBits, UpperBound} = IsBits <: UpperBound
+_Out_isa(::IsBits, ::Type{Typ}) where {IsBits, Typ} = IsBits isa Typ
+
+
+# _Out_isa(::Type{Instance}, ::Type{Type{UpperBound}}) where {UpperBound, Instance <: UpperBound} = true
+# _Out_isa(::Type{Instance}, ::Type{Type{UpperBound}}) where {UpperBound, Instance} = false
+# _Out_isa(::Type{Instance}, ::Type{Typ}) where {Instance, Typ} = Instance isa Typ
+# _Out_isa(::IsBits, ::Type{Type{UpperBound}}) where {UpperBound, IsBits <: UpperBound} = true
+# _Out_isa(::IsBits, ::Type{Type{UpperBound}}) where {UpperBound, IsBits} = false
+# _Out_isa(::IsBits, ::Type{Typ}) where {IsBits, Typ} = IsBits isa Typ
+
 
 
 # Core.apply_type
 # ---------------
 
-
-ensure_type_or_bits(T::Type) = T 
-ensure_type_or_bits(T::TypeLevel) = T.value
-ensure_type_or_bits(other) = isbits(other) ? other : error("tryed to create new type with Typevariable which is neither a Type nor bits. Got `$other`.")
-
-# needs value-level because there may be byte-values in the type signature (like Array{Int, 2})
-function _Out_TypeLevel(::typeof(Core.apply_type), T, typeargs...)
-  T′ = ensure_type_or_bits(T)
-  if T isa TypeLevel && T′ isa TypeVar
-    error("assuming TypeLevel T to be a wrapper around Type{YourType}, but got `$(T.value)`")
-  end
-  typeargs′ = ensure_type_or_bits.(typeargs)
-  wheres = filter(x -> x isa TypeVar, typeargs′)
-  @show T′ typeargs′ wheres
+@generated function Out(::Type{Signature}, kw::Type{NamedTupleEmpty}) where {Signature <: Tuple{typeof(Core.apply_type), Vararg}}
+  func, typecall = signature_split_first(Signature)
+  # Core.println("Signature = $Signature")
+  type_T, typeargs_signature = signature_split_first(typecall)
+  T = unwrap_type(type_T)
+  typeargs = map(unwrap_type, Tuple_type_to_value(typeargs_signature))
+  wheres = filter(x -> x isa TypeVar, typeargs)
+  # Core.println("T = $T, typeargs = $typeargs, wheres = $wheres")
   type = if isempty(wheres)
-    T′{typeargs′...}
+    T{typeargs...}
   else
-    foldl(wheres, init=T′{typeargs′...}) do type, typevar
+    foldl(wheres, init=T{typeargs...}) do type, typevar
       UnionAll(typevar, type)
     end
   end
-  @show type
-  mark_as_typelevel(Type{type})
+  # Core.println("type = $type")
+
+  Type{type}  # the typeof the constructed type is wanted
 end
+
+unwrap_type(::Type{Type{T}}) where T = T
+unwrap_type(other) = other  # TODO this silent fallback is currently used for bits values and typevars 
+
+# old:
+
+# ensure_type_or_bits(T::Type) = T 
+# ensure_type_or_bits(T::TypeLevel) = T.value
+# ensure_type_or_bits(other) = isbits(other) ? other : error("tryed to create new type with Typevariable which is neither a Type nor bits. Got `$other`.")
+
+# needs value-level because there may be byte-values in the type signature (like Array{Int, 2})
+# function _Out_TypeLevel(::typeof(Core.apply_type), T, typeargs...)
+#   T′ = ensure_type_or_bits(T)
+#   if T isa TypeLevel && T′ isa TypeVar
+#     error("assuming TypeLevel T to be a wrapper around Type{YourType}, but got `$(T.value)`")
+#   end
+#   typeargs′ = ensure_type_or_bits.(typeargs)
+#   wheres = filter(x -> x isa TypeVar, typeargs′)
+#   @show T′ typeargs′ wheres
+#   type = if isempty(wheres)
+#     T′{typeargs′...}
+#   else
+#     foldl(wheres, init=T′{typeargs′...}) do type, typevar
+#       UnionAll(typevar, type)
+#     end
+#   end
+#   @show type
+#   to_typelevel_or_bits(Type{type})
+# end
