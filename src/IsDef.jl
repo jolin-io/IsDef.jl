@@ -1,12 +1,11 @@
 module IsDef
-export isdef, Out, NotApplicable, NotApplicableError, isapplicable, apply
+export isdef, Out, Out′, NotApplicable, NotApplicableError, isapplicable, apply
 
 using Compat
 using IRTools
-using IRTools: IR, @dynamo, recurse!
+using IRTools: IR, @dynamo, recurse!, xcall
 
 include("utils.jl")
-
 
 """
 just applies a given function to arguments and keyword arguments
@@ -80,8 +79,6 @@ end
 Returns outputtype of function application. Returns `IsDef.NotApplicable` if compiler notices that no Method can be
 found.
 
-When called on values, the values will be cast to types via use of `typeof` for convenience.
-
 !!! warning "CAUTION"
     If `Out(...) == Any`, still a MethodError might happen at runtime. This is due to incomplete type inference.
 
@@ -98,25 +95,47 @@ UnionAll types and abstract types are concretified to the Union of their existin
 to improve type-inference. The only exceptions so far are `Any`, `Function` and `Exception`, as they have way too
 many subtypes to be of practical use.
 """
-Out(f, types::Vararg{Type, N}; kwtypes...) where {N} = Out(apply, Core.Typeof(f), types...; kwtypes...)
-function Out(::typeof(apply), types::Vararg{Type, N}; kwtypes...) where {N}
-  signature_type = Tuple_value_to_type(types)
-  kw_type = NamedTuple_value_to_type(kwtypes.data)
-  Out(signature_type, kw_type)
+Out(f, types::Vararg{Any, N}; kwtypes...) where {N} = Out(apply, Core.Typeof(f), types...; kwtypes...)
+
+function Out(::typeof(apply), types::Vararg{Any, N}; kwtypes...) where {N}
+  foreach(ensure_typevalue_or_type, types)
+  foreach(ensure_typevalue_or_type, kwtypes.data)
+  
+  if isempty(kwtypes.data)
+    signature_type = Tuple_value_to_type(types)
+    Out(signature_type)
+  else
+    kw_type = NamedTuple_value_to_type(kwtypes.data)
+    signature_type = tuple(kwftype(types[1]), kw_type, types...)
+    Out(signature_type)
+  end
 end
-# default to empty keywords type for convenience
-Out(::Type{T}) where T<:Tuple = Out(T, NamedTupleEmpty)
+
+ensure_typevalue_or_type(type::Type) = type
+function ensure_typevalue_or_type(other)
+  istypevalue(other) || error("need either isbits, Symbol or plain Type as argument, bot got `$other`. See `istypevalue` for details.")
+  other
+end
 
 
 # we support the all value version extra in order to not accidentily confuse the keyword argument usage
-Out′(f, args::Vararg{Any, N}; kwargs...) where N = Out(f, map(Core.Typeof, args)...; map(Core.Typeof, kwargs.data)...)
+Out′(f, args::Vararg{Any, N}; kwargs...) where N = Out(f, map(to_type_or_typevalue, args)...; map(to_type_or_typevalue, kwargs.data)...)
+
+to_type_or_typevalue(a) = istypevalue(a) ? a : Core.Typeof(a)
+to_type_or_typevalue(a::Function) = Core.Typeof(a)  # functions are isbits surprisingly. Still it seems slightly more convenient to work on type level, as we can use Union then
 
 
-
-# Further Details
-# ===============
+# Generic Fallback using IR
+# -------------------------
 
 include("generic.jl")
-include("instances.jl")
 
-end # module
+
+# Ready Implementations of `Out`
+# ------------------------------
+
+include("functions-intrinsic.jl")
+include("functions-builtin.jl")
+include("functions-Base.jl")
+
+end  # module

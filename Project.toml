@@ -9,6 +9,7 @@ ExprParsers = "c5caad1f-83bd-4ce8-ac8e-4b29921e994e"
 IRTools = "7869d1d1-7146-5819-86e3-90919afe41df"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
+Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
 
 [compat]
 Compat = "2.1, 3"
