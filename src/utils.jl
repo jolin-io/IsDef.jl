@@ -237,6 +237,7 @@ end
 
 function lift_ifelse!(ir::IRTools.IR, var_ifelse::IRTools.Variable)
   IRTools.explicitbranch!(ir)
+  Core.println("var_ifelse = $var_ifelse")
 
   original_block = blockidx(ir, var_ifelse)[1]
   lastvar_original_block = lastvar_of_block(original_block)
@@ -246,7 +247,12 @@ function lift_ifelse!(ir::IRTools.IR, var_ifelse::IRTools.Variable)
     raw"""
     think about these two examples when trying to understand the code 
     ```julia
-    julia> ifelse(t, a, b) = t ? a : b
+    julia> using IRTools, IsDef
+    
+    julia> getval(::Val{T}) where T = T
+    getval (generic function with 1 method)
+
+    julia> ifelse(t, a, b) = getval(t) ? a : b
     ifelse (generic function with 1 method)
 
     julia> ir_ifelse = @code_ir ifelse(true, 1, 2)
@@ -258,7 +264,7 @@ function lift_ifelse!(ir::IRTools.IR, var_ifelse::IRTools.Variable)
   
     julia> function ifelse2(t, a, b)
         println("before")
-        if t
+        if getval(t)
           println("a = $a")
           a
         else
@@ -284,87 +290,111 @@ function lift_ifelse!(ir::IRTools.IR, var_ifelse::IRTools.Variable)
     """
 
     notboth_block = IRTools.Block(ir, both_block.id + 1)
-    ifnot_block = IRTools.Block(ir, only(branches_for_condition(notboth_block, var_ifelse)).block)
+    Core.println("notboth_blockid = $(notboth_block.id)")
+    
+    Core.println("""
+      ir = $ir
+      IRTools.branches(notboth_block) = $(IRTools.branches(notboth_block))
+      conditions = $([(branch.condition, var_ifelse, branch.condition == var_ifelse) for branch in IRTools.branches(notboth_block)])
+    """)
+    _branch_ifnot_block = only(branches_for_condition(notboth_block, var_ifelse))
+    Core.println("_branch_ifnot_block = $(_branch_ifnot_block.block)")
+    
+    blockid_mapping, var_mapping = copy_all_successors!(notboth_block)
+    Core.println("blockid_mapping = $blockid_mapping \nvar_mapping = $var_mapping")
+    
+    branch_ifnot_block = only(branches_for_condition(notboth_block, var_ifelse))
+    Core.println("branch_ifnot_block = $(branch_ifnot_block.block)")
+    
+    ifnot_block_copied = IRTools.block(ir, blockid_mapping[branch_ifnot_block.block])
     branch_if_block = only(branches_for_condition(notboth_block, nothing))
 
     if branch_if_block.block == 0
       # if branch only has a return, we can plainly concentrate on ifnot_block
       # add unconditional branch to ifnot block
-      IRTools.branch!(both_block, ifnot_block, unless = nothing)
-      insert_Union_into_returns2!(ifnot_block, branch_if_block.args[1], var_isbooltype)
+      IRTools.branch!(both_block, ifnot_block_copied, unless = nothing)
+      insert_Union_into_returns_step2_ifnotbranch(ifnot_block_copied, only(branch_if_block.args))
 
     else
       # if branch is its own other branch, possibly complex
-      if_block = IRTools.Block(ir, branch_if_block.block)
+      if_block_copied = IRTools.Block(ir, blockid_mapping[branch_if_block.block])
       # add unconditional branch to if block
-      IRTools.branch!(both_block, if_block, unless = nothing)
+      IRTools.branch!(both_block, if_block_copied, unless = nothing)
+      
+      # TODO only for debugging purposes:
+      var_if_block_copied = pushfirst!(if_block_copied, xcall(identity, :if_block_copied))
+      
 
       # change if block to account for both-semantics
-      # we need to identify ifnot block even if blocks changed
+      # we need to identify ifnot block even if if-blocks changed
       # we do so by adding a dummy variable
-      var_ifnot_block = pushfirst!(ifnot_block, xcall(identity, :ifnot_block))
-      get_ifnot_block() = blockidx(ir, var_ifnot_block)[1]
-      insert_Union_into_returns1!(if_block, get_ifnot_block, var_isbooltype)
+      var_ifnot_block_copied = pushfirst!(ifnot_block_copied, xcall(identity, :ifnot_block_copied))
+      get_ifnot_block_copied() = blockidx(ir, var_ifnot_block_copied)[1]
+      insert_Union_into_returns_step1_ifbranch(if_block_copied, get_ifnot_block_copied)
     end
   end
 end
 
-function insert_Union_into_returns1!(if_block, get_ifnot_block, var_isbooltype)
-  insert_Union_into_returns1!(if_block, get_ifnot_block, var_isbooltype, Set{IRTools.Variable}())
+function insert_Union_into_returns_step1_ifbranch(if_block, get_ifnot_block)
+  insert_Union_into_returns_step1_ifbranch(if_block, get_ifnot_block, Set{IRTools.Variable}())
 end
-function insert_Union_into_returns1!(if_block, get_ifnot_block, var_isbooltype, visited_lastvar)
+function insert_Union_into_returns_step1_ifbranch(if_block, get_ifnot_block, visited_lastvar)
   ir = if_block.ir
-  lastvar = lastvar_of_block(if_block)
+  lastvar = lastvar_of_block(if_block)  # TODO is this valid way of identifying a block? maybe we should rather insert a label to the top and search for the label, in case of changes that should be stabler
   lastvar in visited_lastvar && return nothing
-  visited_lastvar′ = union(visited_lastvar, [lastvar])
+  push!(visited_lastvar, lastvar)  # we use mutatation because different branches may diamond-like come to the same branch down the road.
     
-  for branch in IRTools.branches(if_block)
-    if branch.block != 0
+  for (i, branch) in enumerate(IRTools.branches(if_block))
+    if branch.block != 0  # no return branch, i.e. conditional or unconditional branch 
       branch_block = IRTools.block(ir, branch.block)
-      # skip over ifnotblock
-      branch_block != get_ifnot_block() || continue
-      insert_Union_into_returns1!(branch_block, get_ifnot_block, var_isbooltype, visited_lastvar′)
+      # REMOVE branch to ifnotblock
+      if branch_block == get_ifnot_block()
+        Core.println("BEFORE ir = $(ir)")
+        Core.println("BEFORE IRTools.branches(if_block) = $(IRTools.branches(if_block))")
+        deleteat!(IRTools.branches(if_block), i)
+        Core.println("AFTER IRTools.branches(if_block) = $(IRTools.branches(if_block))")
+        # update branch_block to subsequent branch
+        # there is always such a subsequent branch, as at least an unconditional branch to if_block follows
+        branch_block = IRTools.block(ir, IRTools.branches(if_block)[i].block)
+      end
+      insert_Union_into_returns_step1_ifbranch(branch_block, get_ifnot_block, visited_lastvar)
       
       # anything coming after an unconditional branch can never happen
       isnothing(branch.condition) && break 
 
     else # return branch
-      shortcycle_after_var_if_condition!(ir, lastvar, var_isbooltype) do returning_block, _
-        ifnot_block = get_ifnot_block()
-        # unconditional branch to ifnotblock
-        IRTools.branch!(returning_block, ifnot_block, unless = nothing)
-        insert_Union_into_returns2!(ifnot_block, branch.args[1], var_isbooltype, visited_lastvar′)
-      end
+      ifnot_block = get_ifnot_block()
+      # unconditional branch to ifnotblock INSTEAD of return
+      return_value = only(branch.args)
+      IRTools.branches(if_block)[i] = IRTools.branch(ifnot_block, unless = nothing)
+      insert_Union_into_returns_step2_ifnotbranch(ifnot_block, return_value, visited_lastvar)
+      # if we encounter multiple return, we ignore those which are never called
+      break
     end
   end
 end
 
-function insert_Union_into_returns2!(ifnot_block, T, var_isbooltype)
-  insert_Union_into_returns2!(ifnot_block, T, var_isbooltype, Set{IRTools.Variable}())
+function insert_Union_into_returns_step2_ifnotbranch(ifnot_block, T)
+  insert_Union_into_returns_step2_ifnotbranch(ifnot_block, T, Set{IRTools.Variable}())
 end
 
-function insert_Union_into_returns2!(ifnot_block, T, var_isbooltype, visited_lastvar)
+function insert_Union_into_returns_step2_ifnotbranch(ifnot_block, T, visited_lastvar)
   ir = ifnot_block.ir
   lastvar = lastvar_of_block(ifnot_block)
   lastvar in visited_lastvar && return nothing
-  visited_lastvar′ = union(visited_lastvar, [lastvar])
+  push!(visited_lastvar, lastvar)
   
   for branch in IRTools.branches(ifnot_block)
     if branch.block != 0  # branch branch
-      insert_Union_into_returns2!(IRTools.block(ir, branch.block), T, var_isbooltype, visited_lastvar′)
+      insert_Union_into_returns_step2_ifnotbranch(IRTools.block(ir, branch.block), T, visited_lastvar)
       # anything coming after an unconditional branch can never happen
       isnothing(branch.condition) && break
   
     else # return branch
-      shortcycle_after_var_if_condition!(ir, lastvar, var_isbooltype) do returning_block, _
-        # finally we can combine the two strengths
-        newreturntype = IRTools.insertafter!(ir, lastvar, xcall(create_union, T, branch.args[1]))
-        IRTools.return!(returning_block, newreturntype)
-      end
-
-      # you may wonder why this is needed, however we actually change the branches of the block in place
-      # as a return indicated the last used branch of a block (and we do not wont to change the new shortcycle block we just created)
-      # we simply break here
+      # finally we can combine the two strengths
+      newreturntype = IRTools.insertafter!(ir, lastvar, xcall(create_union, T, only(branch.args)))
+      branch.args[1] = newreturntype
+      # if we encounter multiple return, we ignore those which are never called
       break
     end
   end
@@ -391,41 +421,123 @@ end
 
 
 
+"""
+    copy_all_successors!(IRTools.block(ir, 1))
+
+will duplicate all blocks which are successors of the given block.
+This is useful if you would like to create an alternative branch, slightly altering the original code
+"""
 function copy_all_successors!(branchblock)
   ir = branchblock.ir
-  subsequent_computation = collect(IRTools.Inner.successors(branchblock))
+  subsequent_computation = sort(
+    collect(all_successors(branchblock)),
+    by = block -> block.id
+  )
 
   var_mapping = Dict()
-  block_mapping = Dict()
+  blockid_mapping = Dict()
   for block in subsequent_computation
-      newblock = IRTools.block!(ir)
-      block_mapping[block] = newblock
-      # copy statements
-      for (var, stmnt) in block
-          newvar = push!(newblock, stmnt)
-          var_mapping[var] = newvar
-      end
-      # copy branches
-      append!(IRTools.branches(newblock), map(copy, IRTools.branches(block)))
+    newblock = IRTools.block!(ir)
+    blockid_mapping[block.id] = newblock.id
+    # copy statements
+    for (var, stmnt) in block
+      newvar = push!(newblock, stmnt)
+      var_mapping[var] = newvar
+    end
+    # create new arguments
+    for arg in IRTools.arguments(block)
+      newarg = IRTools.argument!(newblock)
+      var_mapping[arg] = newarg
+    end
+    # copy branches
+    append!(IRTools.branches(newblock), map(copy, IRTools.branches(block)))
   end
 
-  apply_var_mapping(expr) = MacroTools.prewalk(expr) do x
-      get(var_mapping, x, x)
-  end
-  apply_var_mapping(var::IRTools.Variable) = get(var_mapping, var, var)
-
-  for newblock in values(block_mapping)
-      for (var, stmnt) in newblock
-          newblock[var] = apply_var_mapping(stmnt)
+  for newblockid in values(blockid_mapping)
+    newblock = IRTools.Block(ir, newblockid)
+    for (var, stmnt) in newblock
+      newblock[var] = apply_var_mapping(var_mapping, stmnt)
+    end
+    for (i, branch) in enumerate(IRTools.branches(newblock))
+      branch = @set branch.condition = apply_var_mapping(var_mapping, branch.condition)
+      branch = @set branch.args = map(x -> apply_var_mapping(var_mapping, x), branch.args)
+      if branch.block != 0
+        branch = @set branch.block = blockid_mapping[branch.block]
       end
-      for (i, branch) in enumerate(IRTools.branches(newblock))
-          @set branch.condition = apply_var_mapping(branch.condition)
-          @set branch.args = map(apply_var_mapping, branch.args)
-      end
+      IRTools.branches(newblock)[i] = branch
+    end
   end
-  (; block_mapping, var_mapping)
+  (; blockid_mapping, var_mapping)
 end
 
+apply_var_mapping(var_mapping, expr) = MacroTools.prewalk(expr) do x
+  get(var_mapping, x, x)
+end
+apply_var_mapping(var_mapping, var::IRTools.Variable) = get(var_mapping, var, var)
+
+
+function all_successors(blocks::Union{Set, AbstractVector, Tuple})
+  Set(successor for block in blocks for successor in IRTools.successors(block))
+end
+function all_successors(b::IRTools.Block)
+  successors::Set{IRTools.Block} = Set(IRTools.successors(b))
+  more_successors::Set{IRTools.Block} = union(successors, all_successors(successors))
+  while successors != more_successors
+    successors = more_successors
+    more_successors = union(successors, all_successors(successors))
+  end    
+  more_successors
+end
+
+
+
+function inline_all_blocks_with_arguments!(blocks)
+  blocks_with_arguments = [block for block in blocks if !isempty(IRTools.arguments(block))]
+  if !isempty(blocks_with_arguments)
+    ir = blocks_with_arguments[1].ir
+  end
+  for block_with_arguments in blocks_with_arguments
+    blocks_referring = [block for block in blocks for branch in IRTools.branches(block) if branch.block == block_with_arguments.id]
+
+    for block_referring in blocks_referring
+      n_statements_before = length(IRTools.BasicBlock(block_referring).stmts)
+      
+      i, branch = only([(i, branch) for (i, branch) in enumerate(IRTools.branches(block_referring)) if branch.block == block_with_arguments.id])
+      @assert isnothing(branch.condition) "can only inline unconditional-branches-with-arguments as of now, however found conditional branch with arguments: $branch"
+      
+      var_mapping = Dict()
+      # copy statements
+      for (var, stmnt) in block_with_arguments
+        newvar = push!(block_referring, stmnt)
+        var_mapping[var] = newvar
+      end
+
+      # map arguments
+      for (arg, newarg) in zip(IRTools.arguments(block_with_arguments), branch.args)
+        var_mapping[arg] = newarg
+      end
+
+      # change variables
+      n_statements_after = length(IRTools.BasicBlock(block_referring).stmts)
+      for i in (n_statements_before+1):n_statements_after
+        block_referring[i] = apply_var_mapping(var_mapping, block_referring[i])
+      end
+  
+      # adapt branches
+      newbranches = map(copy, IRTools.branches(block_with_arguments))
+      for (i, branch) in enumerate(newbranches)
+        branch = @set branch.condition = apply_var_mapping(var_mapping, branch.condition)
+        branch = @set branch.args = map(x -> apply_var_mapping(var_mapping, x), branch.args)
+        newbranches[i] = branch
+      end
+      append!(IRTools.branches(block_referring), newbranches)
+      # delete the old branching-with-arguments now to be safe with block-id changes 
+      deleteat!(IRTools.branches(block_referring), i)
+    end
+    
+    IRTools.deleteblock!(ir, block_with_arguments.id)
+  end
+end
 
 
 # TypeLevel

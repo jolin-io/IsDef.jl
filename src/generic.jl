@@ -48,9 +48,34 @@ end
   # sneakyinvoke trick taken from the IRTools example https://github.com/FluxML/IRTools.jl/blob/master/examples/sneakyinvoke.jl
   IRTools.argument!(ir, at = 1)
 
-  Core.println("_Out_dynamo before recurse")
+  # inline sub-functions (branches with arguments)
+  Core.println("ir before inline = $ir")
+  inline_all_blocks_with_arguments!(IRTools.blocks(ir)[2:end]) # the first block should keep its arguments 
+  Core.println("ir after inline = $ir")
 
+  # Change all branch.condition such that they can work with `Bool` in addition to `true` and `false`
+  all_ifelse = Set{IRTools.Variable}()
+  for block in iterateblocks(ir)
+    for branch in IRTools.branches(block)
+      condition_var = branch.condition
+      # skip over unconditional or return branches
+      isnothing(condition_var) && continue
+      # skip over already handled var
+      condition_var ∈ all_ifelse && continue
+      # skip over isbooltype conditions, they are safe as we introduce them right here      
+      condition_statement = ir[condition_var]
+      isexpr(condition_statement, :call) && condition_statement.args[1] === isbooltype && continue
+
+      # support Bool
+      lift_ifelse!(ir, condition_var)
+      push!(all_ifelse, condition_var)
+      Core.println("ifelse $(condition_var) - ir after = $ir")
+    end
+  end
+
+  Core.println("_Out_dynamo before recurse")
   # replace functioncalls with calls to Out
+  # as this introduces new branches, it has to be done after lifting ifelse
   for block in iterateblocks(ir)
     Core.println("_Out_dynamo block = $block")
     for (x, st) in block
