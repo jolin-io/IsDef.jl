@@ -7,7 +7,7 @@ using IRTools
 # -------------------------------
 
 
-function Out(sigtype_typevalues::Type{T}) where {T<:Tuple}
+@generated function Out(::Type{sigtype_typevalues}) where {sigtype_typevalues<:Tuple}
   Core.println("Out sigtype_typevalues = $sigtype_typevalues")
   args = mark_typelevel_or_typevalue(Tuple_type_to_value(sigtype_typevalues))
   sigtype_notypevalues = signature_without_typevalues(sigtype_typevalues)
