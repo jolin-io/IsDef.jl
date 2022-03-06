@@ -84,7 +84,7 @@ end
 
 
 function Out(sigtype::Type{<:Tuple})
-  hassignature(sigtype) || Core.println("NOTAPPLICABLE: returning NotApplicable as couldn't find signature $sigtype")
+  hassignature(sigtype) || @debug "NOTAPPLICABLE: returning NotApplicable as couldn't find signature $sigtype"
   hassignature(sigtype) || return NotApplicable
   ir = IR(sigtype.parameters...)
   ir === nothing && error("NOTAPPLICABLE: Encountered signature type with no IR (intermediate representation), please overwrite IsDef.Out respectively")
@@ -94,9 +94,9 @@ function Out(sigtype::Type{<:Tuple})
 end
 
 function _Out_TypeLevel(sigargs...)
-  Core.println("sigargs = $(sigargs)")
+  @debug "sigargs = $(sigargs)"
   sigtypeargs = typify_args(sigargs...)
-  Core.println("sigtypeargs = $(sigtypeargs)")
+  @debug "sigtypeargs = $(sigtypeargs)"
   if sigtypeargs[1] === Core.IntrinsicFunction
     # TODO improve this errormessage such that it is raised at the correct place
     error("""Recursed to the Core.IntrinsicFunction $(sigargs[1]),
@@ -105,12 +105,12 @@ function _Out_TypeLevel(sigargs...)
       as the typeof all intrinsic functions is `Core.IntrinsicFunction`
     """)
   end
-  anynotapplicable(sigtypeargs...) && Core.println("NOTAPPLICABLE: found NotApplicable in args, also returning NotApplicable")
+  anynotapplicable(sigtypeargs...) && @debug "NOTAPPLICABLE: found NotApplicable in args, also returning NotApplicable"
   anynotapplicable(sigtypeargs...) && return TypeLevel(NotApplicable)
   sigtype = Tuple{sigtypeargs...}
-  Core.println("sigtype = $sigtype")
+  @debug "sigtype = $sigtype"
   result = Out(sigtype)
-  Core.println("out = $result")
+  @debug "out = $result"
   mark_as_typelevel(result)
 end
 

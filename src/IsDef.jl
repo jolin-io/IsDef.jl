@@ -1,5 +1,5 @@
 module IsDef
-export isdef, Out, Out′, NotApplicable, NotApplicableError, isapplicable, apply
+export isdef, Out, Out′, NotApplicable, isapplicable, apply
 
 using Compat
 using IRTools
@@ -24,10 +24,6 @@ apply(f, args...; kwargs...) = f(args...; kwargs...)
 # hence it is more intuitive to use type, but also more natural, as `Out` may be used within type range as `Out(f, ...) <: NotApplicable`.
 struct NotApplicable
   NotApplicable() = error("Please use `NotApplicable` type instead of `NotApplicable()` instance.")
-end
-
-struct NotApplicableError
-  NotApplicableError() = error("Please use `NotApplicableError` type instead of `NotApplicableError()` instance.")
 end
 
 isapplicable(::Type{NotApplicable}) = false
@@ -99,13 +95,13 @@ Out(f, types::Vararg{Any, N}; kwtypes...) where {N} = Out(apply, Core.Typeof(f),
 
 function Out(::typeof(apply), types::Vararg{Any, N}; kwtypes...) where {N}
   foreach(ensure_typevalue_or_type, types)
-  foreach(ensure_typevalue_or_type, kwtypes.data)
+  foreach(ensure_typevalue_or_type, values(kwtypes))
   
-  if isempty(kwtypes.data)
+  if isempty(values(kwtypes))
     signature_type = Tuple_value_to_type(types)
     Out(signature_type)
   else
-    kw_type = NamedTuple_value_to_type(kwtypes.data)
+    kw_type = NamedTuple_value_to_type(values(kwtypes))
     signature_type = tuple(kwftype(types[1]), kw_type, types...)
     Out(signature_type)
   end

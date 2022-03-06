@@ -27,7 +27,7 @@ end
 # ---------------
 
 function Out(::Type{Tuple{typeof(typeassert), Value, ValueType}}) where {Value, ValueType}
-    Value isa ValueType || NotApplicableError
+    Value isa ValueType || NotApplicable
 end
 
 
@@ -122,10 +122,10 @@ julia> @code_ir f([1,2])
     _apply_iterate, rest1 = signature_split_first(Signature)
     _iterate, rest2 = signature_split_first(rest1)
     _func, args = signature_split_first(rest2)
-    Core.println("Out _apply_iterate func = $Func, args = $args")
+    @debug "Out _apply_iterate func = $Func, args = $args"
     # some Tuples may be typevalues themselves, as Tuples of typevalues actually count as typevalues
     args′ = map(ensure_Tuple_type, Tuple_type_to_value(args))
-    Core.println("Out _apply_iterate func = $Func, args = $args, args′ = $args′")
+    @debug "Out _apply_iterate func = $Func, args = $args, args′ = $args′"
     if all(arg -> isa(arg, Type{<:Tuple}), args′)
         new_signature = concat_Tuples(Tuple{Func}, args′...)
         :(IsDef.Out($new_signature))

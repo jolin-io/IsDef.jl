@@ -1,4 +1,5 @@
 using IsDef
+using IRTools
 using Test
 # using Documenter
 import FunctionWrappers: FunctionWrapper
@@ -20,6 +21,116 @@ import FunctionWrappers: FunctionWrapper
 
 # TODO
 Out(Base.map, typeof(identity), Vector{Int})
+
+Out(Base.similar, Vector, Int)
+
+function ifelse2(t, a, b)
+    println("before")
+    if t
+        println("a = $a")
+        a
+    else
+        println("b = $b")
+        b
+    end
+end
+
+Out(ifelse2, Bool, Int, String)
+
+function gettoknowirtools(a, b)
+    sum = 0
+    for i in 1:a
+        add = if isodd(i)
+            5
+        else
+            9
+        end
+        sum += i + add
+    end
+    return a, b
+end
+
+function applyinnerfunc(a, b)
+    sum = 0
+    for i in 1:a
+        sum += i
+    end
+    return a, b
+end
+
+Out(applyinnerfunc, Int, String)
+
+
+
+using IRTools
+ir = @code_ir applyinnerfunc(4, :hi)
+
+IsDef.keep_only_what_is_explicitly_used!(ir)
+
+IsDef.lift_ifelse!(ir)
+
+
+ir = IsDef.Out_implementation(Tuple{typeof(applyinnerfunc), Int, String})
+
+IRTools.evalir(ir, Tuple{}, applyinnerfunc, Bool, Int, String)
+
+ir_original = @code_ir applyinnerfunc(1, 2)
+@show ir_original
+
+ir = @code_ir applyinnerfunc(1, 2)
+
+IRTools.Inner.blockidx(ir, IRTools.Variable(8))
+bs = IRTools.blocks(ir)
+
+
+IsDef.lift_ifelse!(ir)
+
+
+
+
+all_ifelse = Set{IRTools.Variable}()
+block, state_block = iterate(IsDef.iterateblocks(ir))
+block, state_block = iterate(IsDef.iterateblocks(ir), state_block)
+
+branch, state_branch = iterate(IRTools.branches(block))
+branch, state_branch = iterate(IRTools.branches(block), state_branch)
+
+condition_var = branch.condition
+# skip over unconditional or return branches
+@show isnothing(condition_var)
+# skip over already handled var
+@show condition_var ∈ all_ifelse
+
+haskey(ir, condition_var)
+
+# it might be that the condition_var is just an argument and if so won't have an expression mapped to it
+if haskey(ir, condition_var)
+# skip over isbooltype conditions, they are safe as we introduce them right here
+condition_statement = ir[condition_var]
+using ExprParsers
+@show EP.isexpr(condition_statement.expr, :call) && condition_statement.expr.args[1] === IsDef.isbooltype
+end
+
+# support Bool
+IsDef.lift_ifelse!(ir, condition_var)
+push!(all_ifelse, condition_var)
+@debug "ifelse $(condition_var) - ir after = $ir"
+
+
+
+
+
+# -----------
+
+
+IsDef.inline_all_blocks_with_arguments!(IRTools.blocks(ir)[2:end])
+
+IsDef.lift_ifelse!(ir)
+ir
+
+
+
+getval(t) ? a : b
 
 @test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}  # TODO continue with Out(typeof)
 

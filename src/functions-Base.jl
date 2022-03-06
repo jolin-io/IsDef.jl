@@ -31,3 +31,30 @@ function Out(signature::Type{Tuple{typeof(convert), Type{T1}, T2}}) where {T1, T
   hassignature(signature) || return NotApplicable  # TODO: we are assuming that if there is a method, it also works
   T1
 end
+
+
+# Container
+# ---------
+
+# similar
+# .......
+
+# generic fallbacks onto simple method
+function Out(signature::Type{Tuple{typeof(similar), Type{Container}, Type{Element}}}) where {Container, Element}
+  Out(Tuple{typeof(similar), Container, Element})
+end
+function Out(signature::Type{Tuple{typeof(similar), Container, Type{Element}}}) where {Container, Element}
+  Out(Tuple{typeof(similar), Container, Element})
+end
+function Out(signature::Type{Tuple{typeof(similar), Type{Container}, Element}}) where {Container, Element}
+  Out(Tuple{typeof(similar), Container, Element})
+end
+
+# function Out(signature::Type{Tuple{typeof(similar), <:Vector, Element}}) where {Element}
+#   Vector{Element}
+# end
+
+function Out(signature::Type{Tuple{typeof(map), F, A}}) where {F, A}
+  new_element_type = Out(apply, F, eltype(A))
+  Out(Tuple{typeof(similar), F, new_element_type})
+end
