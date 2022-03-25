@@ -3,7 +3,7 @@
 # ---------------------------
 
 # TODO, is this always true?
-Out(::Type{<:Tuple{Union{typeof(+), typeof(-), typeof(*), typeof(/)}, T1, T2}}) where {T1, T2} = promote_types_or_typevalues(T1, T2)
+Out(::Type{<:Tuple{Union{typeof(+), typeof(-), typeof(*), typeof(/)}, T1, T2}}) where {T1, T2} = promote_type_or_typevalue(T1, T2)
 Out(::Type{<:Tuple{Union{typeof(+), typeof(-), typeof(*), typeof(/)}, Vararg{T}}}) where T = T
 
 

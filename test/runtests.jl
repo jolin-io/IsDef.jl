@@ -13,16 +13,15 @@ import FunctionWrappers: FunctionWrapper
 @test apply(reduce, +, [2,3], init=1) == reduce(+, [2,3], init=1)
 
 
-# test isdef/Out
-# --------------
+# test small anonymous functions
+# ------------------------------
 
 @test @inferred(Out(x -> 2x, Int)) == Int
 @test @inferred(Out(x -> 2.3x, Int)) == Float64
 
-# TODO
-Out(Base.map, typeof(identity), Vector{Int})
 
-Out(Base.similar, Vector, Int)
+# test ifelse
+# -----------
 
 function ifelse2(t, a, b)
     println("before")
@@ -35,7 +34,9 @@ function ifelse2(t, a, b)
     end
 end
 
-Out(ifelse2, Bool, Int, String)
+@test Out(ifelse2, Bool, Int, String) == Union{Int, String}
+@test Out(ifelse2, true, Int, String) == Int
+@test Out(ifelse2, false, Int, String) == String
 
 function gettoknowirtools(a, b)
     sum = 0
@@ -58,8 +59,76 @@ function applyinnerfunc(a, b)
     return a, b
 end
 
+using IsDef
+exprs = Expr[]
+
+exclude_list = [
+    :(!=)
+    :(==)
+    :(!==)
+    :(===)
+    :(!)
+    :(>=)
+    :(<=)
+    :(<)
+    :(>)
+]
+
+Base.Vector
+
+nonabstracttypes = Type[]
+for name in names(Base)
+    type = getfield(Base, name)
+    isa(type, Type) || continue
+    !isabstracttype(type) || continue
+    push!(nonabstracttypes, type)
+end
+
+
+for name in names(Base)
+    name ∉ exclude_list || continue
+    func = getfield(Base, name)
+    isa(func, Function) || continue
+
+    for m in methods(func)
+        m.module === Base || continue
+        tupletype, typevars = IsDef.split_typevar(m.sig)
+        if Any ∈ tupletype.parameters || Function ∈ tupletype.parameters
+            @warn "found Any or Function in signature $(m.sig)"
+        end
+
+        if isempty(typevars)
+            push!(exprs, quote
+                function IsDef.Out(::Type{$tupletype})
+                    Base.promote_op($apply, $(tupletype.parameters...))
+                end
+            end)
+        
+        else
+            parameters_exprs = map(tupletype.parameters) do p
+                if p ∈ typevars
+                    Expr(:call, IsDef.promote_type_or_typevalue, p)
+                else
+                    p
+                end
+            end
+            push!(exprs, quote
+                function IsDef.Out(::Type{$tupletype}) where {$(typevars...)}
+                    Base.promote_op($apply, $(parameters_exprs...))
+                end
+            end)
+        end
+    end
+end
+exprs[10]
+length(exprs)
+g(a::A, b::B) where A where B = a, b, A, B
+
+IsDef.Out(::Type{Tuple{Base.Colon, A, B}}) where {A, B} = Base.promote_op(apply, Base.Colon, promote_type_or_typevalue(A), B)
+
 Out(applyinnerfunc, Int, String)
 
+IsDef.Out_implementation(Tuple{typeof(applyinnerfunc), Int, String})
 
 
 using IRTools

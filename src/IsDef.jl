@@ -1,5 +1,8 @@
 module IsDef
-export isdef, Out, Out′, NotApplicable, isapplicable, apply
+export apply
+export isdef, Out, Out′
+export NotApplicable, isapplicable
+export promote_type_or_typevalue
 
 using Compat
 using IRTools
@@ -117,6 +120,7 @@ end
 # we support the all value version extra in order to not accidentily confuse the keyword argument usage
 Out′(f, args::Vararg{Any, N}; kwargs...) where N = Out(f, map(to_type_or_typevalue, args)...; map(to_type_or_typevalue, kwargs.data)...)
 
+# TODO this looks like it needs to be merged with extract_type_or_typevalue
 to_type_or_typevalue(a) = istypevalue(a) ? a : Core.Typeof(a)
 to_type_or_typevalue(a::Function) = Core.Typeof(a)  # functions are isbits surprisingly. Still it seems slightly more convenient to work on type level, as we can use Union then
 

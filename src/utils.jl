@@ -63,13 +63,13 @@ function hassignature(::Type{Signature}; world=typemax(UInt)) where Signature <:
   result !== nothing
 end
 
-promote_types_or_typevalues(a::Type) = a
-promote_types_or_typevalues(a) = Core.Typeof(a)
+promote_type_or_typevalue(a::Type) = a
+promote_type_or_typevalue(a) = Core.Typeof(a)
 
-promote_types_or_typevalues(a::Type, b::Type) = promote_type(a, b)
-promote_types_or_typevalues(a, b::Type) = promote_type(Core.Typeof(a), b)
-promote_types_or_typevalues(a::Type, b) = promote_type(a, Core.Typeof(b))
-promote_types_or_typevalues(a, b) = promote_type(Core.Typeof(a), Core.Typeof(b))
+promote_type_or_typevalue(a::Type, b::Type) = promote_type(a, b)
+promote_type_or_typevalue(a, b::Type) = promote_type(Core.Typeof(a), b)
+promote_type_or_typevalue(a::Type, b) = promote_type(a, Core.Typeof(b))
+promote_type_or_typevalue(a, b) = promote_type(Core.Typeof(a), Core.Typeof(b))
 
 wrap_typevalue_into_Val(a::Type) = a
 wrap_typevalue_into_Val(a) = Val(a)
@@ -293,7 +293,6 @@ function shortcycle_if_notapplicable!(ir::IRTools.IR, var::IRTools.Variable)
 end
 
 function shortcycle_after_var_if_condition!(finish_block!::Function, ir::IRTools.IR, after_var_or_endofblock, condition)
-  @info "ir before shortcycle: $ir"
   if isa(after_var_or_endofblock, IRTools.Variable)
     var = after_var_or_endofblock
     oldblock, i_var_oldblock = blockidx(ir, var)
@@ -337,7 +336,6 @@ function shortcycle_after_var_if_condition!(finish_block!::Function, ir::IRTools
     insert!(oldblock, i_var_oldblock+1, condition)  # also works if i_var_oldblock == 0
   end
   IRTools.branch!(oldblock, newblock, unless = var_is_condition)
-  @info "ir after shortcycle: $ir"
   finish_block!(oldblock, newblock, blockid_mapping, var_is_condition)
   return var_is_condition
 end
@@ -372,23 +370,18 @@ function lift_ifelse!(ir::IRTools.IR)
       # support Bool
       lift_ifelse!(ir, block, condition_var)
       push!(all_ifelse, condition_var)
-      @debug "ifelse $(condition_var) - ir after = $ir"
     end
   end
   return ir
 end
 
 function lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse::IRTools.Variable)
-  @debug "var_ifelse = $var_ifelse"
   # condition = Internal(xcall(isbooltype, var_ifelse))
   condition = xcall(TypeLevelFunction(isbooltype), var_ifelse)
 
   # we need to copy before doing shortcycling,
   # because within shortcycling do-block the ir is in a corrupt intermediate state
-  @info "ir before copy: $ir"
-  blockid_mapping_copy, var_mapping = copy_all_successors!(original_block)
-  @info "ir after copy: $ir"
-  @debug "blockid_mapping = $blockid_mapping_copy \nvar_mapping = $var_mapping"
+  blockid_mapping_copy, _var_mapping = copy_all_successors!(original_block)
   
   shortcycle_after_var_if_condition!(ir, original_block, condition) do shortcycle_block, continuation_block, blockid_mapping_shortcycle, var_isbooltype
     
@@ -443,22 +436,8 @@ function lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse:
       for (k, v) in blockid_mapping_copy
     )
 
-    @debug "continuation_blockid = $(continuation_block.id)"
-    @debug """
-      ir = $ir
-      var_isbooltype = $var_isbooltype
-      IRTools.branches(continuation_block) = $(IRTools.branches(continuation_block))
-      conditions = $([(branch.condition, var_ifelse, branch.condition == var_ifelse) for branch in IRTools.branches(continuation_block)])
-    """
-    # @info "ir before copy: $ir"
-    # blockid_mapping, var_mapping = copy_all_successors!(continuation_block)
-    # @info "ir after copy: $ir"
-    # @debug "blockid_mapping = $blockid_mapping \nvar_mapping = $var_mapping"
-    
     branch_ifnot_block = only(branches_for_condition(continuation_block, var_ifelse))
-    branch_if_block = only(branches_for_condition(continuation_block, nothing))
-    @debug "branch_ifnot_block = $(branch_ifnot_block.block), branch_if_block = $(branch_if_block.block)"
-    
+    branch_if_block = only(branches_for_condition(continuation_block, nothing))    
   
     ifnot_block_copied = IRTools.block(ir, blockid_mapping[branch_ifnot_block.block])
     
@@ -496,10 +475,7 @@ function insert_Union_into_returns_step1_ifbranch(if_block, ifnot_block, visited
       branch_block = IRTools.block(ir, branch.block)
       # REMOVE branch to ifnotblock
       if branch_block == ifnot_block
-        @debug "BEFORE ir = $(ir)"
-        @debug "BEFORE IRTools.branches(if_block) = $(IRTools.branches(if_block))"
         deleteat!(IRTools.branches(if_block), i)
-        @debug "AFTER IRTools.branches(if_block) = $(IRTools.branches(if_block))"
         # update branch_block to subsequent branch
         # there is always such a subsequent branch, as at least an unconditional branch to if_block follows
         branch_block = IRTools.block(ir, IRTools.branches(if_block)[i].block)
@@ -697,3 +673,10 @@ extract_type_or_typevalue(a) = istypevalue(a) ? a : Core.Typeof(a)
 extract_type_or_typevalue(a::Function) = Core.Typeof(a)
 extract_type_or_typevalue(a::TypeLevelFunction) = Core.Typeof(a)
 extract_type_or_typevalue(a::Core.IntrinsicFunction) = IsDef.IntrinsicFunction{a}
+
+
+split_typevar(base) = base, TypeVar[]
+function split_typevar(t::UnionAll)
+  base, typevars = split_typevar(t.body)
+  base, [t.var; typevars...]
+end
