@@ -1,113 +1,19 @@
+module IRToolsUtils
+
+export keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
+
+using IsDef.DataTypes: NotApplicable, TypeLevelFunction
+using IsDef.Utils.DynamoInternals: TypeLevel
+
 using Setfield
+using IRTools: IRTools, IR, @dynamo, recurse!, xcall
+using MacroTools: MacroTools, isexpr
 
-# Type helpers
-# ------------
-
-"""
-  IntrinsicFunction
-"""
-struct IntrinsicFunction{Function}
-  IntrinsicFunction{F}() where F = error("""
-    `IsDef.IntrinsicFunction{Function}` is a more detailed helper type used instead of `Core.IntrinsicFunction`.
-    It has no instance.
-  """)
-end
-
-
-"""
-    istypevalue(1)
-
-like `Base.isbits`, however accounts for surprings facts like Symbol not being bits type.
-
-"typevalue" is understood as in the documentation about Value Types https://docs.julialang.org/en/v1/manual/types/#%22Value-types%22  
-"""
-istypevalue(::T) where T = istypevaluetype(T)
-
-"""
-    istypevaluetype(Int)
-
-like `Base.isbitstype`, however accounts for surprings facts like Symbol not being bits type.
-
-"typevalue" is understood as in the documentation about Value Types https://docs.julialang.org/en/v1/manual/types/#%22Value-types%22  
-"""
-istypevaluetype(::Type{Symbol}) = true
-istypevaluetype(type) = isbitstype(type)
-
-kwftype(f::Function) = kwftype(typeof(f))
-kwftype(::Type{F}) where F <: Function = Core.kwftype(F)
-
-
-function hassignature(::Type{Signature}; world=typemax(UInt)) where Signature <: Tuple 
-  if Signature.parameters[1] <: Core.Builtin
-    builtin_function = repr(Signature.parameters[1])
-    error("""
-      Recursed to builtin function `$builtin_function`.
-      Please, overwrite `IsDef.Out` for `IsDef.Out(::Type{Tuple{typeof($builtin_function), ...}}) = ...`
-      or for a previous function.
-
-      The queried signature was:
-      $Signature
-    """)  
-  elseif Signature.parameters[1] <: IsDef.IntrinsicFunction
-    intrinsic_function = repr(Signature.parameters[1].parameters[1])
-    error("""
-      Recursed to intrinsic function `$intrinsic_function`.
-      Please, overwrite `IsDef.Out` for `IsDef.Out(::Type{Tuple{IsDef.IntrinsicFunction{$intrinsic_function}, ...}}) = ...`
-      or for a previous function.
-      
-      The queried signature was:
-      $Signature
-    """)  
-  end
-  result = @ccall jl_gf_invoke_lookup(Signature::Any, world::UInt)::Any
-  result !== nothing
-end
-
-promote_type_or_typevalue(a::Type) = a
-promote_type_or_typevalue(a) = Core.Typeof(a)
-
-promote_type_or_typevalue(a::Type, b::Type) = promote_type(a, b)
-promote_type_or_typevalue(a, b::Type) = promote_type(Core.Typeof(a), b)
-promote_type_or_typevalue(a::Type, b) = promote_type(a, Core.Typeof(b))
-promote_type_or_typevalue(a, b) = promote_type(Core.Typeof(a), Core.Typeof(b))
-
-wrap_typevalue_into_Val(a::Type) = a
-wrap_typevalue_into_Val(a) = Val(a)
-
-function signature_split_first(sigtype::Type{T}) where {T<:Tuple}
-  func, args... = tuple(sigtype.parameters...)
-  func, Tuple{args...}
-end
-function signature_add_first(first::F, sigtype::Type{T}) where {F, T<:Tuple}
-  Tuple{F, sigtype.parameters...}
-end
-
-signature_without_typevalues(::Type{T}) where T<:Tuple = Tuple_value_to_type(map(_without_typevalue, Tuple_type_to_value(T)))
-_without_typevalue(type::Type) = type
-_without_typevalue(typevalue) = Core.Typeof(typevalue)  # because we are in a signature, we know that typevalues are just those which are note Types
-
-
-"""
-TODO it should be `Tuple{map(Core.Typeof, tuple(T.parameters...))}(tuple(T.parameters...))`
-however this destroys type information as of now, see https://discourse.julialang.org/t/tuple-constructor-forgets-types/65730
-i.e. we use the simpler version as of now
-"""
-Tuple_type_to_value(::Type{T}) where T<:Tuple = tuple(T.parameters...)  
-Tuple_value_to_type(mytuple::Tuple) = Tuple{mytuple...}
-
-function NamedTuple_value_to_type(namedtuple::NT) where NT<:NamedTuple
-  NamedTuple{keys(namedtuple), Tuple{values(namedtuple)...}}
-end
-function NamedTuple_type_to_value(::Type{NamedTuple{Names, NT}}) where {Names, NT<:Tuple}
-  NamedTuple{Names, Tuple{map(Core.Typeof, tuple(NT.parameters...))...}}(tuple(NT.parameters...))
-end
-
-const NamedTupleEmpty = typeof(NamedTuple())
-
+import IsDef
 
 
 # IRTools helpers
-# ---------------
+# ===============
 
 # Marker
 # ------
@@ -285,7 +191,7 @@ julia> IRTools.func(ir_g)(g, "hi")
 ```
 """
 function shortcycle_if_notapplicable!(ir::IRTools.IR, var::IRTools.Variable)
-  condition = xcall(===, var, NotApplicable)
+  condition = xcall(===, var, TypeLevel(NotApplicable))
   shortcycle_after_var_if_condition!(ir, var, condition) do shortcycle_block, _continuation_block, _blockid_mapping, _var_is_condition
     # IRTools.return!(shortcycle_block, Internal(GlobalRef(IsDef, :NotApplicable)))
     IRTools.return!(shortcycle_block, GlobalRef(IsDef, :NotApplicable))
@@ -632,51 +538,4 @@ function remove_internal_flags!(ir)
   end
 end
 
-
-# TypeLevel
-# ---------
-
-struct TypeLevelFunction{F}
-  func::F
-end
-
-struct TypeLevel{T}
-  value::T
-  # we need Core.Typeof to collect all available type information
-  TypeLevel(value) = new{Core.Typeof(value)}(value)
-end
-TypeLevel(typelevel::TypeLevel) = typelevel
-TypeLevel(func::TypeLevelFunction) = func
-
-function Base.show(io::IO, x::TypeLevel)
-  print(io, "TypeLevel($(repr(x.value)))")
-end
-
-# we directly overload Tuple as several output arguments may be either Tuple or plain value, and in case of Tuple we want to broadcast
-mark_typelevel_or_typevalue(several::Union{Tuple, NamedTuple}) = map(mark_typelevel_or_typevalue, several)
-mark_typelevel_or_typevalue(single::TypeLevel) = single
-# Functions are isbits, however we treat them as types everywhere, because we can then use Union on them for dispatch
-mark_typelevel_or_typevalue(single::Function) = TypeLevel(single)
-mark_typelevel_or_typevalue(single::TypeLevelFunction) = TypeLevel(single)
-# typevalue (like 1, :symbol, true, ...) type information would get lost when put into TypeLevel
-# hence we leave them literal, just as if someone would have written a literal value into the source code
-mark_typelevel_or_typevalue(single) = istypevalue(single) ? single : TypeLevel(single)
-
-extract_type(a::TypeLevel) = a.value
-extract_type(a::Union{Tuple, NamedTuple}) = map(extract_type, a)
-extract_type(a) = Core.Typeof(a)
-
-extract_type_or_typevalue(a::TypeLevel) = a.value
-extract_type_or_typevalue(a::Union{Tuple, NamedTuple}) = map(extract_type_or_typevalue, a)
-extract_type_or_typevalue(a) = istypevalue(a) ? a : Core.Typeof(a)
-# functions are valid typevalues surprisingly. Still it seems slightly more convenient to work on type level, as we can use Union then
-extract_type_or_typevalue(a::Function) = Core.Typeof(a)
-extract_type_or_typevalue(a::TypeLevelFunction) = Core.Typeof(a)
-extract_type_or_typevalue(a::Core.IntrinsicFunction) = IsDef.IntrinsicFunction{a}
-
-
-split_typevar(base) = base, TypeVar[]
-function split_typevar(t::UnionAll)
-  base, typevars = split_typevar(t.body)
-  base, [t.var; typevars...]
 end

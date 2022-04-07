@@ -59,76 +59,44 @@ function applyinnerfunc(a, b)
     return a, b
 end
 
-using IsDef
-exprs = Expr[]
-
-exclude_list = [
-    :(!=)
-    :(==)
-    :(!==)
-    :(===)
-    :(!)
-    :(>=)
-    :(<=)
-    :(<)
-    :(>)
-]
-
-Base.Vector
-
-nonabstracttypes = Type[]
-for name in names(Base)
-    type = getfield(Base, name)
-    isa(type, Type) || continue
-    !isabstracttype(type) || continue
-    push!(nonabstracttypes, type)
-end
-
-
-for name in names(Base)
-    name ∉ exclude_list || continue
-    func = getfield(Base, name)
-    isa(func, Function) || continue
-
-    for m in methods(func)
-        m.module === Base || continue
-        tupletype, typevars = IsDef.split_typevar(m.sig)
-        if Any ∈ tupletype.parameters || Function ∈ tupletype.parameters
-            @warn "found Any or Function in signature $(m.sig)"
-        end
-
-        if isempty(typevars)
-            push!(exprs, quote
-                function IsDef.Out(::Type{$tupletype})
-                    Base.promote_op($apply, $(tupletype.parameters...))
-                end
-            end)
-        
-        else
-            parameters_exprs = map(tupletype.parameters) do p
-                if p ∈ typevars
-                    Expr(:call, IsDef.promote_type_or_typevalue, p)
-                else
-                    p
-                end
-            end
-            push!(exprs, quote
-                function IsDef.Out(::Type{$tupletype}) where {$(typevars...)}
-                    Base.promote_op($apply, $(parameters_exprs...))
-                end
-            end)
-        end
-    end
-end
-exprs[10]
-length(exprs)
-g(a::A, b::B) where A where B = a, b, A, B
-
-IsDef.Out(::Type{Tuple{Base.Colon, A, B}}) where {A, B} = Base.promote_op(apply, Base.Colon, promote_type_or_typevalue(A), B)
-
 Out(applyinnerfunc, Int, String)
 
+
+applyinnerfunc(2, "hi")
+
 IsDef.Out_implementation(Tuple{typeof(applyinnerfunc), Int, String})
+using IsDef.Utils: TypeLevel, Tuple_value_to_type, dynamointernals_innervalue_to_types, dynamointernals_ensure_innervalue, signature_without_typevalues
+IsDef._Out_dynamo_implementation(Tuple{typeof(applyinnerfunc), Int64, String}, TypeLevel(typeof(applyinnerfunc)), TypeLevel(Int64), TypeLevel(String))
+
+function _dynamointernals_innervalue_to_types_ANDTHEN_Out_ANDTHEN_dynamointernals_ensure_innervalue(args...)
+    args′ = Tuple_value_to_type(dynamointernals_innervalue_to_types(args))
+    dynamointernals_ensure_innervalue(Out(args′))
+end
+  
+
+Out(Main.:(:), 1, 2)
+
+args = (Main.:(:), 1, 2)
+args′ = Tuple_value_to_type(dynamointernals_innervalue_to_types(args))
+result = Out(args′)
+
+IsDef.revise!()
+
+sigtype_notypevalues = signature_without_typevalues(args′)
+# functions which consists purely out of Base/Core stuff are handled by falling back to Core.Compiler.return_type
+# we need to make sure, that this is not too general, hence we check whether the to be called methods are too generic
+all(_isleaf, fieldtypes(sigtype_notypevalues))
+mts = covering_method_instances(sigtype_notypevalues)
+length(mts) > 1 && error(
+    "not sure what this is about. Found several matching method instances. Probably an ambiguity error. methods = $mts"
+)
+method_instance = only(mts)
+  
+
+@code_lowered Out(args′)
+
+IsDef.Out_implementation(args′)
+mark_typelevel_or_typevalue(result)
 
 
 using IRTools

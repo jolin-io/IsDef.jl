@@ -8,6 +8,6 @@ function applyinnerfunc(a, b)
     return a, b
 end
 
-IsDef.Out_implementation(Tuple{typeof(applyinnerfunc), Int, String})
+Out(applyinnerfunc, Int, String)
 
-
+IsDef.revise!()

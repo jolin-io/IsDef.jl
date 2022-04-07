@@ -1,14 +1,19 @@
 module IsDef
+using Reexport
 export apply
 export isdef, Out, Out′
 export NotApplicable, isapplicable
-export promote_type_or_typevalue
+export promote_type_or_val
 
 using Compat
-using IRTools
-using IRTools: IR, @dynamo, recurse!, xcall
 
-include("utils.jl")
+include("DataTypes.jl")
+using .DataTypes
+
+include("Utils/Utils.jl")
+using .Utils.TypeUtils: kwftype, Tuple_value_to_type, NamedTuple_value_to_type, IntrinsicFunction
+using .Utils.TypeValues: ensure_typevalue_or_type, Typeof, VAL
+
 
 """
 just applies a given function to arguments and keyword arguments
@@ -16,21 +21,12 @@ just applies a given function to arguments and keyword arguments
 This little helper is crucial if you want to typeinfer
 when only knowing the function type instead of the function instance.
 """
-apply(f, args...; kwargs...) = f(args...; kwargs...)
+@inline apply(f, args...; kwargs...) = f(args...; kwargs...)
 
 
 
 # Core Interface
 # ==============
-
-# we decided to use type-level because `Out` normally returns types.
-# hence it is more intuitive to use type, but also more natural, as `Out` may be used within type range as `Out(f, ...) <: NotApplicable`.
-struct NotApplicable
-  NotApplicable() = error("Please use `NotApplicable` type instead of `NotApplicable()` instance.")
-end
-
-isapplicable(::Type{NotApplicable}) = false
-isapplicable(other) = true
 
 """
     isdef(func, ArgType1, ArgType2, ...)::Bool
@@ -97,32 +93,21 @@ many subtypes to be of practical use.
 Out(f, types::Vararg{Any, N}; kwtypes...) where {N} = Out(apply, Core.Typeof(f), types...; kwtypes...)
 
 function Out(::typeof(apply), types::Vararg{Any, N}; kwtypes...) where {N}
-  foreach(ensure_typevalue_or_type, types)
-  foreach(ensure_typevalue_or_type, values(kwtypes))
+  types_ = map(ensure_typevalue_or_type, types)
+  values_kwtypes = map(ensure_typevalue_or_type, values(kwtypes))
   
   if isempty(values(kwtypes))
-    signature_type = Tuple_value_to_type(types)
+    signature_type = Tuple_value_to_type(types_)
     Out(signature_type)
   else
-    kw_type = NamedTuple_value_to_type(values(kwtypes))
-    signature_type = tuple(kwftype(types[1]), kw_type, types...)
+    kw_type = NamedTuple_value_to_type(values_kwtypes)
+    signature_type = tuple(kwftype(types_[1]), kw_type, types_...)
     Out(signature_type)
   end
 end
 
-ensure_typevalue_or_type(type::Type) = type
-function ensure_typevalue_or_type(other)
-  istypevalue(other) || error("need either isbits, Symbol or plain Type as argument, bot got `$other`. See `istypevalue` for details.")
-  other
-end
-
-
 # we support the all value version extra in order to not accidentily confuse the keyword argument usage
-Out′(f, args::Vararg{Any, N}; kwargs...) where N = Out(f, map(to_type_or_typevalue, args)...; map(to_type_or_typevalue, kwargs.data)...)
-
-# TODO this looks like it needs to be merged with extract_type_or_typevalue
-to_type_or_typevalue(a) = istypevalue(a) ? a : Core.Typeof(a)
-to_type_or_typevalue(a::Function) = Core.Typeof(a)  # functions are isbits surprisingly. Still it seems slightly more convenient to work on type level, as we can use Union then
+Out′(f, args::Vararg{Any, N}; kwargs...) where N = Out(f, map(Typeof, args)...; map(Typeof, kwargs.data)...)
 
 
 # Generic Fallback using IR
