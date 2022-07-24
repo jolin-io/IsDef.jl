@@ -109,7 +109,7 @@ function _Out_implementation(::Type{sigtype_typevalues}) where {sigtype_typevalu
     # 1) `static_hasmethod` does not work on them
     # 2) they don't have a proper type
 
-    intrinsic_function = repr(F.parameters[1])
+    intrinsic_function = F.parameters[1]
     # error("""
     #   Recursed to intrinsic function `$intrinsic_function`.
     #   Please, overwrite `IsDef.Out` for `IsDef.Out(::Type{Tuple{IsDef.IntrinsicFunction{$intrinsic_function}, ...}}) = ...`
@@ -138,9 +138,11 @@ function _Out_implementation(::Type{sigtype_typevalues}) where {sigtype_typevalu
       found_generic_base_function && error("""
         Recursed to a generic leaf function (everything is from Base or Core, and found at least one too generic type $TOO_GENERIC_TYPES).
         
-          Please, overwrite `IsDef.Out` for `IsDef.Out(::Type{$sigtype_typevalues}) = ...`
+          Please, overwrite `IsDef.Out` for the general case `IsDef.Out(::Type{$(method_instance.def.sig)}) = ...`
+
+          Alternatively you can overwrite the concrete case `IsDef.Out(::Type{$sigtype_typevalues}) = ...`
         
-        or for a another function called before that one.
+        or another function called before that one.
         """)
     else
       Core.println("Warning: found empty method_instances for signature $sigtype_notypevalues.")
@@ -159,6 +161,8 @@ function _Out_implementation(::Type{sigtype_typevalues}) where {sigtype_typevalu
     # fall back to _Out_dynamo if method does not exist
     # we need to generate static_hasmethod call for it to actually retrigger compilation in case the hasmethod changed
     dynamo_args = dynamointernals_ensure_innervalue(Tuple_type_to_value(sigtype_typevalues))
+    Core.println("sigtype_notypevalues = $sigtype_notypevalues; dynamo_args = $dynamo_args")
+    Core.println("_Out_dynamo = $(_Out_dynamo(sigtype_notypevalues, dynamo_args...))")
     return quote
       $static_hasmethod($sigtype_notypevalues) || return $NotApplicable
       $_Out_dynamo($sigtype_notypevalues, $(dynamo_args...)) |> $dynamointernals_innervalue_to_types

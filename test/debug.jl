@@ -9,5 +9,3 @@ function applyinnerfunc(a, b)
 end
 
 Out(applyinnerfunc, Int, String)
-
-IsDef.revise!()

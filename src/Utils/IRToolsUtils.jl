@@ -194,6 +194,7 @@ function shortcycle_if_notapplicable!(ir::IRTools.IR, var::IRTools.Variable)
   condition = xcall(===, var, TypeLevel(NotApplicable))
   shortcycle_after_var_if_condition!(ir, var, condition) do shortcycle_block, _continuation_block, _blockid_mapping, _var_is_condition
     # IRTools.return!(shortcycle_block, Internal(GlobalRef(IsDef, :NotApplicable)))
+    IRTools.push!(shortcycle_block, xcall(Core.println, "var = ", repr(var), " = ", var))
     IRTools.return!(shortcycle_block, GlobalRef(IsDef, :NotApplicable))
   end
 end
