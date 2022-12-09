@@ -1,3 +1,5 @@
+using IsDef.Utils.TypeValues: ValType, ValTypeof
+
 # typeof(===)
 # -----------
 
@@ -35,22 +37,21 @@ end
 # getfield
 # --------
 
-function Out(::Type{Tuple{typeof(getfield), Typ, Field}}) where {Typ, Field}
-    if Field isa Type
-        Core.Compiler.return_type(getfield, Tuple{Typ, Field})
-    else  # Field is a typevalue 
-        # while this does not work with anonymous functions, type-inference indeed works with this little helper
-        Core.Compiler.return_type(typedgetfield, Tuple{Typ, Val{Field}})
-    end
+function Out(::Type{Tuple{typeof(getfield), Typ, FieldTyp}}) where {Typ, FieldTyp}
+    _Core_return_type(getfield, Tuple{Typ, Field})
 end
-typedgetfield(x, ::Val{field}) where {field} = getfield(x, field)
+function Out(::Type{Tuple{typeof(getfield), Typ, FieldTyp}}) where {Typ, FieldTyp <: ValType}
+    # while this does not work with anonymous functions, type-inference indeed works with this little helper
+    _Core_return_type(typedgetfield, Tuple{Typ, FieldTyp})
+end
+typedgetfield(x, ::ValType{_T, field}) where {_T, field} = getfield(x, field)
 
 
 
 # isa
 # ----
 
-Out(::Type{Tuple{typeof(isa), Instance, Typ}}) where {Instance, Typ} = _Out_isa(Instance, Typ)
+Out(::Type{Tuple{typeof(isa), Instance, Typ}}) where {Instance, Typ} = ValTypeof(_Out_isa(Instance, Typ))
 
 _Out_isa(::Type{Instance}, ::Type{Type{UpperBound}}) where {Instance, UpperBound} = Instance <: UpperBound
 _Out_isa(::Type{Instance}, ::Type{Typ}) where {Instance, Typ} = Instance isa Typ
@@ -85,10 +86,25 @@ _Out_isa(::TypeValue, ::Type{Typ}) where {TypeValue, Typ} = TypeValue isa Typ
     end
     Type{type}  # the typeof the constructed type is wanted
 end
-  
+
 unwrap_type(::Type{Type{T}}) where T = T
-unwrap_type(other) = other  # TODO this silent fallback is currently used for typevalues and typevars 
-  
+# a Tuple type is reverted to a simple tuple
+unwrap_type(::Type{T}) where T <: Tuple = map(unwrap_type, Tuple_type_to_value(T))
+# a ValType is reverted to its value
+unwrap_type(::Type{ValType{T, V}}) where {T,V} = V
+# typevariables stay as is
+unwrap_type(tv::TypeVar) = tv
+# fallback - what did we missed?
+unwrap_type(other) = error("Unreachable Reached. We got something new `$other` with type `$(typeof(other))`")
+
+
+# Core.kwfunc
+# -----------
+
+function Out(::Type{Tuple{typeof(Core.kwfunc), Func}}) where Func
+    return Core.Typeof(Core.kwfunc(Func.instance))
+end
+
 
 # Core._apply_iterate
 # -------------------
@@ -119,18 +135,19 @@ julia> @code_ir f([1,2])
 @generated function Out(::Type{Signature}) where {Func, Signature <: Tuple{typeof(Core._apply_iterate), typeof(iterate), Func, Vararg}}
     # `func(mytuple...)` is translated to `Core._apply_iterate(iterate, func, mytuple)`
     # similarly we translate the typeinference
+    Core.println("Out Signature = $Signature")
     _apply_iterate, rest1 = signature_split_first(Signature)
     _iterate, rest2 = signature_split_first(rest1)
     _func, args = signature_split_first(rest2)
-    @debug "Out _apply_iterate func = $Func, args = $args"
+    Core.println("Out _apply_iterate func = $Func, args = $args")
     # some Tuples may be typevalues themselves, as Tuples of typevalues actually count as typevalues
     args′ = map(ensure_Tuple_type, Tuple_type_to_value(args))
-    @debug "Out _apply_iterate func = $Func, args = $args, args′ = $args′"
+    Core.println("Out _apply_iterate func = $Func, args = $args, args′ = $args′")
     if all(arg -> isa(arg, Type{<:Tuple}), args′)
         new_signature = concat_Tuples(Tuple{Func}, args′...)
         :(IsDef.Out($new_signature))
     else
-        args_while_tuple = [] 
+        args_while_tuple = []
         for arg in args′
             isa(arg, Type{<:Tuple}) || break
             push!(args_while_tuple, arg)

@@ -17,7 +17,6 @@ Like `hasmethod` but runs at compile-time (and does not accept a worldage argume
 @generated function static_hasmethod(@nospecialize(sig::Type{Signature})) where {Signature<:Tuple}
     # The signature type:
     covering_method_insts = covering_method_instances(Signature)
-
     method_doesnot_exist = isempty(covering_method_insts)
     ret_func = method_doesnot_exist ? _hasmethod_false : _hasmethod_true
     ci_orig = uncompressed_ast(typeof(ret_func).name.mt.defs.func)

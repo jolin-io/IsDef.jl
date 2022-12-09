@@ -1,8 +1,8 @@
 module IRToolsUtils
 
-export keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
+export detect_cycle, keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
 
-using IsDef.DataTypes: NotApplicable, TypeLevelFunction
+using IsDef.DataTypes: NotApplicable, TypeValueFunction
 using IsDef.Utils.DynamoInternals: TypeLevel
 
 using Setfield
@@ -44,7 +44,7 @@ blockidx(ir, var) = if isargument(ir, var)
       return (block, 0)
     end
   end
-else 
+else
   return IRTools.Inner.blockidx(ir, var)
 end
 
@@ -60,6 +60,32 @@ IRTools.block(wrapper::IRIterateBlocks, i) = IRTools.block(wrapper.ir, i)
 function Base.iterate(wrapper::IRIterateBlocks, state = 1)
   state <= length(wrapper) || return nothing
   IRTools.block(wrapper, state), (state+1)
+end
+
+# detect_cycle
+# ------------
+
+"""
+    detect_cycle(ir)::Bool
+
+Returns true if the blocks have a cyclic dependency, otherwise false.
+"""
+function detect_cycle(ir::IRTools.IR)
+  # start with return blocks
+  current_blocks = [IRTools.Block(ir, 1)]
+  branch_trace = Set{IRTools.Block}()
+
+  while !isempty(current_blocks)
+      next_block = popfirst!(current_blocks)
+      successors = IRTools.successors(next_block)
+      append!(current_blocks, successors)
+      if isdisjoint(branch_trace, successors)
+          union!(branch_trace, successors)
+      else
+          return true
+      end
+  end
+  return false
 end
 
 
@@ -101,7 +127,7 @@ end
 
 function _count_variables!(ir::IRTools.IR, dict!)
   for block ∈ IRTools.blocks(ir)
-    _count_variables!(block, dict!)    
+    _count_variables!(block, dict!)
   end
 end
 
@@ -113,7 +139,7 @@ function _count_variables!(block::IRTools.Block, dict!)
     _count_variables!(b, dict!)
   end
 end
-    
+
 function _count_variables!(expr::Expr, dict!)
   for a ∈ expr.args
     _count_variables!(a, dict!)
@@ -193,9 +219,7 @@ julia> IRTools.func(ir_g)(g, "hi")
 function shortcycle_if_notapplicable!(ir::IRTools.IR, var::IRTools.Variable)
   condition = xcall(===, var, TypeLevel(NotApplicable))
   shortcycle_after_var_if_condition!(ir, var, condition) do shortcycle_block, _continuation_block, _blockid_mapping, _var_is_condition
-    # IRTools.return!(shortcycle_block, Internal(GlobalRef(IsDef, :NotApplicable)))
-    IRTools.push!(shortcycle_block, xcall(Core.println, "var = ", repr(var), " = ", var))
-    IRTools.return!(shortcycle_block, GlobalRef(IsDef, :NotApplicable))
+    IRTools.return!(shortcycle_block, var)
   end
 end
 
@@ -284,19 +308,19 @@ end
 
 function lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse::IRTools.Variable)
   # condition = Internal(xcall(isbooltype, var_ifelse))
-  condition = xcall(TypeLevelFunction(isbooltype), var_ifelse)
+  condition = xcall(TypeValueFunction(isbooltype), var_ifelse)
 
   # we need to copy before doing shortcycling,
   # because within shortcycling do-block the ir is in a corrupt intermediate state
   blockid_mapping_copy, _var_mapping = copy_all_successors!(original_block)
-  
+
   shortcycle_after_var_if_condition!(ir, original_block, condition) do shortcycle_block, continuation_block, blockid_mapping_shortcycle, var_isbooltype
-    
+
     raw"""
-    think about these two examples when trying to understand the code 
+    think about these two examples when trying to understand the code
     ```julia
     julia> using IRTools, IsDef
-    
+
     julia> getval(::Val{T}) where T = T
     getval (generic function with 1 method)
 
@@ -309,7 +333,7 @@ function lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse:
       return %3
     2:
       return %4
-  
+
     julia> function ifelse2(t, a, b)
         println("before")
         if getval(t)
@@ -344,10 +368,10 @@ function lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse:
     )
 
     branch_ifnot_block = only(branches_for_condition(continuation_block, var_ifelse))
-    branch_if_block = only(branches_for_condition(continuation_block, nothing))    
-  
+    branch_if_block = only(branches_for_condition(continuation_block, nothing))
+
     ifnot_block_copied = IRTools.block(ir, blockid_mapping[branch_ifnot_block.block])
-    
+
     if branch_if_block.block == 0
       # if branch only has a return, we can plainly concentrate on ifnot_block
       # add unconditional branch to ifnot block
@@ -359,7 +383,7 @@ function lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse:
       if_block_copied = IRTools.Block(ir, blockid_mapping[branch_if_block.block])
       # add unconditional branch to if block
       IRTools.branch!(shortcycle_block, if_block_copied, branch_if_block.args..., unless = nothing)
-      
+
       # change if-block to account for both-semantics
       insert_Union_into_returns_step1_ifbranch(if_block_copied, ifnot_block_copied)
     end
@@ -373,12 +397,12 @@ end
 
 function insert_Union_into_returns_step1_ifbranch(if_block, ifnot_block, visited_blocks)
   ir = if_block.ir
-  
+
   if_block ∉ visited_blocks || return nothing
   push!(visited_blocks, if_block)  # we use mutation because different branches may diamond-like come to the same branch down the road.
-    
+
   for (i, branch) in enumerate(IRTools.branches(if_block))
-    if branch.block != 0  # no return branch, i.e. conditional or unconditional branch 
+    if branch.block != 0  # no return branch, i.e. conditional or unconditional branch
       branch_block = IRTools.block(ir, branch.block)
       # REMOVE branch to ifnotblock
       if branch_block == ifnot_block
@@ -388,9 +412,9 @@ function insert_Union_into_returns_step1_ifbranch(if_block, ifnot_block, visited
         branch_block = IRTools.block(ir, IRTools.branches(if_block)[i].block)
       end
       insert_Union_into_returns_step1_ifbranch(branch_block, ifnot_block, visited_blocks)
-      
+
       # anything coming after an unconditional branch can never happen
-      isnothing(branch.condition) && break 
+      isnothing(branch.condition) && break
 
     else # return branch
       # unconditional branch to ifnotblock INSTEAD of return
@@ -410,21 +434,21 @@ end
 
 function insert_Union_into_returns_step2_ifnotbranch(ifnot_block, T, visited_blocks)
   ir = ifnot_block.ir
-  
+
   ifnot_block ∉ visited_blocks || return nothing
   push!(visited_blocks, ifnot_block)
-  
+
   for branch in IRTools.branches(ifnot_block)
     if branch.block != 0  # branch branch
       insert_Union_into_returns_step2_ifnotbranch(IRTools.block(ir, branch.block), T, visited_blocks)
       # anything coming after an unconditional branch can never happen
       isnothing(branch.condition) && break
-  
+
     else # return branch
       # finally we can combine the two strengths
       i_endofblock = length(IRTools.BasicBlock(ifnot_block).stmts)
       # newreturnexpr = Internal(xcall(create_union, T, only(branch.args)))
-      newreturnexpr = xcall(TypeLevelFunction(create_union), T, only(branch.args))
+      newreturnexpr = xcall(TypeValueFunction(create_union), T, only(branch.args))
       newreturnvariable = insert!(ifnot_block, i_endofblock+1, newreturnexpr)
       branch.args[1] = newreturnvariable
       # if we encounter multiple return, we ignore those which are never called
@@ -512,7 +536,7 @@ function all_successors(b::IRTools.Block)
   while successors != more_successors
     successors = more_successors
     more_successors = union(successors, all_successors(successors))
-  end    
+  end
   more_successors
 end
 

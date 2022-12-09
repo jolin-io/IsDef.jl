@@ -3,7 +3,7 @@ using Reexport
 export apply
 export isdef, Out, Out′
 export NotApplicable, isapplicable
-export promote_type_or_val
+export promote_type_or_val, ValTypeof
 
 using Compat
 
@@ -12,8 +12,8 @@ using .DataTypes
 
 include("Utils/Utils.jl")
 using .Utils.TypeUtils: kwftype, Tuple_value_to_type, NamedTuple_value_to_type, IntrinsicFunction
-using .Utils.TypeValues: ensure_typevalue_or_type, Typeof, VAL
-
+using .Utils.TypeValues: ensure_typevalue_or_type, Typeof, ValType, ValTypeof
+using .Utils: _Core_return_type
 
 """
 just applies a given function to arguments and keyword arguments
@@ -57,11 +57,11 @@ abstract type.
 
 The only exceptions currently are `Any`, `Function`,  and `Exception`, for which `isdef` returns `true`.
 """
-isdef(f, args...) = isdef(f, typeof.(args)...)
-function isdef(f, types::Vararg{<:Type})
+isdef(f, args::Vararg{<:Any, N}) where {N} = isdef(f, typeof.(args)...)
+function isdef(f::F, types::Vararg{<:Type, N}) where {F, N}
   isdef(apply, Core.Typeof(f), types...)
 end
-function isdef(::typeof(apply), types::Vararg{<:Type})
+function isdef(::typeof(apply), types::Vararg{<:Type, N}) where {N}
   signature_type = Tuple{types...}
   isapplicable(Out(signature_type))
 end
@@ -90,12 +90,12 @@ UnionAll types and abstract types are concretified to the Union of their existin
 to improve type-inference. The only exceptions so far are `Any`, `Function` and `Exception`, as they have way too
 many subtypes to be of practical use.
 """
-Out(f, types::Vararg{Any, N}; kwtypes...) where {N} = Out(apply, Core.Typeof(f), types...; kwtypes...)
+Out(f::F, types...; kwtypes...) where {F} = Out(apply, Core.Typeof(f), types...; kwtypes...)
 
-function Out(::typeof(apply), types::Vararg{Any, N}; kwtypes...) where {N}
+function Out(::typeof(apply), types::Vararg{<:Any, N}; kwtypes...) where {N}
   types_ = map(ensure_typevalue_or_type, types)
   values_kwtypes = map(ensure_typevalue_or_type, values(kwtypes))
-  
+
   if isempty(values(kwtypes))
     signature_type = Tuple_value_to_type(types_)
     Out(signature_type)
@@ -107,7 +107,7 @@ function Out(::typeof(apply), types::Vararg{Any, N}; kwtypes...) where {N}
 end
 
 # we support the all value version extra in order to not accidentily confuse the keyword argument usage
-Out′(f, args::Vararg{Any, N}; kwargs...) where N = Out(f, map(Typeof, args)...; map(Typeof, kwargs.data)...)
+Out′(f::F, args::Vararg{<:Any, N}; kwargs...) where {F, N} = Out(f, map(Typeof, args)...; map(Typeof, kwargs.data)...)
 
 
 # Generic Fallback using IR
@@ -122,5 +122,28 @@ include("generic.jl")
 include("functions-intrinsic.jl")
 include("functions-builtin.jl")
 include("functions-Base.jl")
+
+
+# Type Inference Workarounds
+# --------------------------
+
+# TODO unfortunately this does not work yet for everything
+# Cthulhu still tells that inference failed because of recursion
+
+# define recursion_relation so that inference works better
+# we probably have problems with true infinite cases now, but that should be still
+# better in total
+
+# It is a workaround this issue https://github.com/JuliaLang/julia/issues/45759
+
+recursion_relation_always_true(@nospecialize(_...)) = true
+
+for f in (isdef, Out, Out′, Out_implementation, _Out_implementation, _Out_dynamo, _Out_dynamo_implementation, _dynamointernals_innervalue_to_types_ANDTHEN_Out_ANDTHEN_dynamointernals_ensure_innervalue)
+  for m in methods(f)
+    if Base.moduleroot(m.module) === IsDef
+      m.recursion_relation = recursion_relation_always_true
+    end
+  end
+end
 
 end  # module

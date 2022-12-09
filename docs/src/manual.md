@@ -32,7 +32,7 @@ IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = Retur
 Specifically, if you want to indicate that a given function is not defined for certain argument types, you return `Union{}`
 ```julia
 # NotApplicable denotes being undefined
-IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = NotApplicable  
+IsDef.return_type(::Type{Tuple{typeof(myfunction), Arg1Type, Arg2Type}}) = NotApplicable
 ```
 
 ## Loading IsDef
@@ -50,19 +50,14 @@ makes `isdef` and `Out` available.
 ```jldoctest global
 julia> isdef(+, Int, Int)
 true
-julia> isdef(-, AbstractFloat)
+julia> isdef(-, Float32)
 true
 julia> isdef(-, String)
 false
 julia> isdef(-, AbstractString)
 false
-```
-
-Caution has to be taken for the type `Any`. It is the only special case. It is interpreted as if type-inference was in-accurate, and the concrete values are actually something more specific than Any. This is why, `Any` always results in `true`.
-
-```jldoctest global
 julia> isdef(-, Any)
-true
+false
 ```
 
 ## `Out(f, ...)`

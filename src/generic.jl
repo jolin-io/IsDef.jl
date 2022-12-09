@@ -3,11 +3,11 @@ using MacroTools: MacroTools, isexpr
 using SimpleMatch: @match
 
 using IsDef.Utils.TricksAdapted: static_hasmethod, covering_method_instances
-using IsDef.DataTypes: NotApplicable, isapplicable, TypeLevelFunction
+using IsDef.DataTypes: NotApplicable, isapplicable, TypeValueFunction
 using IsDef.Utils.TypeUtils: Tuple_type_to_value, Tuple_value_to_type, IntrinsicFunction, signature_split_first
-using IsDef.Utils.TypeValues: VAL, signature_without_typevalues
+using IsDef.Utils.TypeValues: ValType, ValTypeof, signature_without_typevalues
 using IsDef.Utils.DynamoInternals: TypeLevel, dynamointernals_ensure_innervalue, dynamointernals_innervalue_to_types
-using IsDef.Utils.IRToolsUtils: keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
+using IsDef.Utils.IRToolsUtils: detect_cycle, keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
 
 
 # the functions need to be defined so that @revise works the first time
@@ -22,15 +22,24 @@ because revise does not work well for generated functions and dynamo we provide 
 """
 function revise!()
   IsDef.@eval begin
-      @generated function Out(::Type{sigtype_typevalues}) where {sigtype_typevalues<:Tuple}
+      @generated function Out(::Type{signature_typevalues}) where {signature_typevalues <: Tuple}
         # we have two versions of _Out_dynamo, one with the final dynamo, and one returning just the implementation itself
         # similar to macros, only that the dynamo needs to be compiled separately
-        Out_implementation(sigtype_typevalues)
+        Out_implementation(signature_typevalues)
       end
-      
-      # @dynamo is similar to @generated, i.e. we get the type of the original arguments 
-      @dynamo function _Out_dynamo(::Type{Signature}, args...) where {Signature <: Tuple}
-        _Out_dynamo_implementation(Signature, args...)
+
+      # @dynamo is similar to @generated, i.e. we get the type of the original arguments
+      @dynamo function _Out_dynamo(::Type{signature_typevalues}, args...) where {signature_typevalues <: Tuple}
+        _Out_dynamo_implementation(signature_typevalues, args...)
+      end
+
+      # define recursion_relation so that inference works better
+      # we probably have problems with true infinite cases now, but that should be still
+      # better in total
+      for f in (Out, _Out_dynamo)
+        for m in methods(f)
+          m.recursion_relation = (@nospecialize(_...)) -> true
+        end
       end
   end
 end
@@ -44,13 +53,10 @@ revise!()
 """
 this level does generic checks which are useful for every implementation
 """
-function Out_implementation(::Type{sigtype_typevalues}) where {sigtype_typevalues<:Tuple}
-  all(isapplicable, sigtype_typevalues.parameters) || begin
-    # this behaviour is type-stable
-    return NotApplicable
-  end
-
-  return _Out_implementation(sigtype_typevalues)
+function Out_implementation(::Type{signature_typevalues}) where {signature_typevalues<:Tuple}
+  # type-stable fallback
+  all(isapplicable, signature_typevalues.parameters) || return NotApplicable
+  return _Out_implementation(signature_typevalues)
 end
 
 
@@ -64,11 +70,10 @@ special handling of TypeLevelFunctions which already work on type-TypeLevel
 
 these are mainly functions which are defined for internal purposes
 """
-function _Out_implementation(::Type{sigtype_typevalues}) where {sigtype_typevalues <: Tuple{TypeLevelFunction, Vararg}}
-  functype, args... = Tuple_type_to_value(sigtype_typevalues)
+function _Out_implementation(::Type{signature_typevalues}) where {signature_typevalues <: Tuple{TypeValueFunction, Vararg}}
+  functype, args... = Tuple_type_to_value(signature_typevalues)
   func = @match(functype) do f
-    # TODO distinguish between TypeLevelFunctions which only take types, and those which also can take typevalues
-    f(::Type{TypeLevelFunction{F}}) where F = F.instance
+    f(::Type{TypeValueFunction{F}}) where F = F.instance
   end
   return func(args...)
 end
@@ -76,15 +81,15 @@ end
 const TOO_GENERIC_TYPES = (Any, Function, Type, Module)
 
 """
-fallback to 
+fallback to
 - either `Core.Compiler.return_type` for simple stuff
 - or `_Out_dynamo` for a generic implementation
 """
-function _Out_implementation(::Type{sigtype_typevalues}) where {sigtype_typevalues<:Tuple}
+function _Out_implementation(::Type{signature_typevalues}) where {signature_typevalues<:Tuple}
   # TODO somehow summarize which functions are automatically defined by `Core.Compiler.return_type`
-  # this is helpful because we can do better than return_type by respective VAL
-  sigtype_notypevalues = signature_without_typevalues(sigtype_typevalues)
-  F = fieldtypes(sigtype_notypevalues)[1]
+  # this is helpful because we can do better than return_type by respective ValType
+  signature_notypevalues = signature_without_typevalues(signature_typevalues)
+  F = fieldtypes(signature_notypevalues)[1]
 
   if F <: Core.Builtin
     # special handling of Builtin functions, as `static_hasmethod` does not work on them
@@ -97,11 +102,12 @@ function _Out_implementation(::Type{sigtype_typevalues}) where {sigtype_typevalu
     #   or for a previous function.
 
     #   The queried signature was:
-    #   $sigtype_typevalues
+    #   $signature_typevalues
     # """)
 
     return quote
-      $(Core.Compiler.return_type)($apply, $sigtype_notypevalues)
+      :Core_Builtin_Fallback
+      $_Core_return_type($apply, $signature_notypevalues)
     end
 
   elseif F <: IsDef.IntrinsicFunction
@@ -114,58 +120,65 @@ function _Out_implementation(::Type{sigtype_typevalues}) where {sigtype_typevalu
     #   Recursed to intrinsic function `$intrinsic_function`.
     #   Please, overwrite `IsDef.Out` for `IsDef.Out(::Type{Tuple{IsDef.IntrinsicFunction{$intrinsic_function}, ...}}) = ...`
     #   or for a previous function.
-      
-    #   The queried signature was:
-    #   $sigtype_typevalues
-    # """)  
 
-    ftype, argstype = signature_split_first(sigtype_notypevalues)
+    #   The queried signature was:
+    #   $signature_typevalues
+    # """)
+
+    ftype, argstype = signature_split_first(signature_notypevalues)
     return quote
-      $(Core.Compiler.return_type)($intrinsic_function, $argstype)
+      :Intrinsic_Function_Fallback
+      $_Core_return_type($intrinsic_function, $argstype)
     end
-  
-  elseif all(_isleaf, fieldtypes(sigtype_notypevalues))
+
+  elseif all(_isleaf, fieldtypes(signature_notypevalues))
     # functions which consists purely out of Base/Core stuff are handled by falling back to Core.Compiler.return_type
     # we need to make sure, that this is not too general, hence we check whether the to be called methods are too generic
-    mts = covering_method_instances(sigtype_notypevalues)
+    mts = covering_method_instances(signature_notypevalues)
     length(mts) > 1 && error(
-      "not sure what this is about. Found several matching method instances. Probably an ambiguity error. methods = $mts"
+      "not sure what this is about. Found several matching method instances. Maybe an ambiguity error. methods = $mts"
     )
     if !isempty(mts)
       method_instance = only(mts)
-    
-      found_generic_base_function = any(t -> t ∈ TOO_GENERIC_TYPES, fieldtypes(method_instance.def.sig))
-      found_generic_base_function && error("""
-        Recursed to a generic leaf function (everything is from Base or Core, and found at least one too generic type $TOO_GENERIC_TYPES).
-        
-          Please, overwrite `IsDef.Out` for the general case `IsDef.Out(::Type{$(method_instance.def.sig)}) = ...`
 
-          Alternatively you can overwrite the concrete case `IsDef.Out(::Type{$sigtype_typevalues}) = ...`
-        
-        or another function called before that one.
+      found_generic_base_function = any(t -> t ∈ TOO_GENERIC_TYPES, fieldtypes(method_instance.def.sig))
+      found_generic_base_function && Core.println(Core.stderr, """
+        WARNING: Recursed to a generic leaf function (everything is from Base or Core, and found at least one too generic type $TOO_GENERIC_TYPES).
+
+        Please, overwrite `IsDef.Out` for the general case, e.g. with a fallback to Core.Compiler.return_type like so:
+        ```julia
+        IsDef.Out(::Type{T}) where T <: $(method_instance.def.sig) = IsDef.Core_return_type(IsDef.apply, T)
+        ```
+
+        Alternatively you can overwrite the given concrete case
+        ```julia
+        IsDef.Out(::Type{$signature_typevalues}) = ...
+        ```
+        Or overwrite another function called before this one in the callstack.
+
+        It is always recommended not to use Core_return_type if you know the return type by other means.
         """)
     else
-      Core.println("Warning: found empty method_instances for signature $sigtype_notypevalues.")
+      Core.println(Core.stderr, "Warning: found empty method_instances for signature $signature_notypevalues.")
       # in the case that the method table is empty, no method is available yet, hence static_hasmethod will return false, but retrigger
-      # compilation if the method is redefined. We simply fallback to Core.Compiler.return_type in this case, even though we do not know 
+      # compilation if the method is redefined. We simply fallback to Core.Compiler.return_type in this case, even though we do not know
       # whether we use it on a generic method.
       # Don't know any better behaviour.
     end
 
     return quote
-      $static_hasmethod($sigtype_notypevalues) || return $NotApplicable
-      $(Core.Compiler.return_type)($apply, $sigtype_notypevalues)
+      :all_types_are_from_BaseCore_fallback
+      $static_hasmethod($signature_notypevalues) || return $NotApplicable
+      $_Core_return_type($apply, $signature_notypevalues)
     end
 
   else
-    # fall back to _Out_dynamo if method does not exist
+    # fall back to _Out_dynamo if method is too generic
     # we need to generate static_hasmethod call for it to actually retrigger compilation in case the hasmethod changed
-    dynamo_args = dynamointernals_ensure_innervalue(Tuple_type_to_value(sigtype_typevalues))
-    Core.println("sigtype_notypevalues = $sigtype_notypevalues; dynamo_args = $dynamo_args")
-    Core.println("_Out_dynamo = $(_Out_dynamo(sigtype_notypevalues, dynamo_args...))")
+    dynamo_args = dynamointernals_ensure_innervalue(Tuple_type_to_value(signature_typevalues))
     return quote
-      $static_hasmethod($sigtype_notypevalues) || return $NotApplicable
-      $_Out_dynamo($sigtype_notypevalues, $(dynamo_args...)) |> $dynamointernals_innervalue_to_types
+      $static_hasmethod($signature_notypevalues) || return $NotApplicable
+      $_Out_dynamo($signature_typevalues, $(dynamo_args...)) |> $dynamointernals_innervalue_to_types
     end
   end
 end
@@ -174,22 +187,37 @@ end
 # _Out_dynamo
 # ===========
 
-function _Out_dynamo_implementation(::Type{Signature}, args...) where {Signature <: Tuple}
-  ir = IR(Tuple_type_to_value(Signature)...)
+# we use signature_typevalues for dispatch, because it has more details
+# and should less often lead to recursion-inference-problems
+function _Out_dynamo_implementation(::Type{signature_typevalues}, args::Vararg{<:Any, N}) where {signature_typevalues <: Tuple, N}
+  signature_notypevalues = signature_without_typevalues(signature_typevalues)
+  ir = IR(Tuple_type_to_value(signature_notypevalues)...)
   isnothing(ir) && error("""
     NOTAPPLICABLE: Encountered signature type with no IR (intermediate representation), please overwrite IsDef.Out respectively.
-    Signature = $(Signature)
-    IR(...) = IR($(Tuple_type_to_value(Signature)...))
+    signature_typevalues = $(signature_typevalues)
+    signature_notypevalues = $(signature_notypevalues)
   """)
 
   # sneakyinvoke trick taken from the IRTools example https://github.com/FluxML/IRTools.jl/blob/master/examples/sneakyinvoke.jl
   IRTools.argument!(ir, at = 1)
 
-
   # all function calls which return arguments which are not used can be safely ignored, as for type inference mutation can be ignored
   keep_only_what_is_explicitly_used!(ir)
 
+  if detect_cycle(ir)
+    ir_fallback = empty(ir)
+    for arg in IRTools.arguments(ir)
+      IRTools.argument!(ir_fallback)
+    end
+    return_type = xcall(_Core_return_type, apply, signature_typevalues)
+    # we still need to wrap return_type into our internal wrappers
+    IRTools.return!(ir_fallback, xcall(dynamointernals_ensure_innervalue, return_type))
+    return ir_fallback
+  end
+
   # Change all branch.condition such that they can work with `Bool` in addition to `true` and `false`
+  # TODO with new signature_typevalues (was a signature_notypevalues before),
+  # we can actually already take out branches immediately, so that the code simplifies in all cases
   lift_ifelse!(ir)
 
   # replace functioncalls with calls to Out
@@ -206,7 +234,7 @@ function _Out_dynamo_implementation(::Type{Signature}, args...) where {Signature
     end
   end
 
-  
+
   # Extra Handling
   # --------------
 
@@ -215,13 +243,15 @@ function _Out_dynamo_implementation(::Type{Signature}, args...) where {Signature
     isexpr(x, :new) ? Expr(:call, new_out, x.args[1]) : x
   end
 
-  ir
+  return ir
 end
 
 
-function _dynamointernals_innervalue_to_types_ANDTHEN_Out_ANDTHEN_dynamointernals_ensure_innervalue(args...)
-  args′ = Tuple_value_to_type(dynamointernals_innervalue_to_types(args))
-  dynamointernals_ensure_innervalue(Out(args′))
+function _dynamointernals_innervalue_to_types_ANDTHEN_Out_ANDTHEN_dynamointernals_ensure_innervalue(args::Vararg{<:Any, N}) where N
+  args′ = Tuple_value_to_type(map(dynamointernals_innervalue_to_types, args))
+  out = Out(args′)
+  result = dynamointernals_ensure_innervalue(out)
+  result
 end
 
 
@@ -236,6 +266,11 @@ In order to define an exception, _isleaf would need to be overwritten.
 function _isleaf(type)
   mod = Base.typename(type).module
   return _isleaf(mod)
+end
+
+function _isleaf(::Type{Core.Const})
+  Core.println(Core.stderr, "WARNING: Found Core.Const and regarding it as leaf type is probably wrong")
+  true
 end
 
 function _isleaf(mod::Module)
@@ -255,6 +290,5 @@ the output type of calling the internal function new, given the target output ty
 new_out(type::TypeLevel{Type{Type{T}}}) where T = TypeLevel(T)
 new_out(type::TypeLevel) = error("this should not happen")
 # if we receive value-level, we can directly treat it as type-level
-new_out(type::TypeLevel{VAL{ParentType, T}}) where {ParentType, T} = dynamointernals_ensure_innervalue(T)
+new_out(type::TypeLevel{ValType{ParentType, T}}) where {ParentType, T} = dynamointernals_ensure_innervalue(T)
 new_out(type) = dynamointernals_ensure_innervalue(type)
-

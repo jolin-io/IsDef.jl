@@ -1,5 +1,5 @@
 using IsDef.Utils.TypeUtils: IntrinsicFunction
-using IsDef.Utils.TypeValues: VAL
+using IsDef.Utils.TypeValues: ValType, ValTypeof
 
 # bitcast
 # -------
@@ -18,9 +18,9 @@ end
 # ===
 # ---
 
-function Out(::Type{Tuple{typeof(===), VAL{T, V}, VAL{T, V}}}) where {T, V}
-    true
+function Out(::Type{Tuple{typeof(===), ValType{T, V}, ValType{T, V}}}) where {T, V}
+    ValTypeof(true)
 end
 function Out(::Type{Tuple{typeof(===), T1, T2}}) where {T1, T2}
-    false
+    ValTypeof(false)
 end

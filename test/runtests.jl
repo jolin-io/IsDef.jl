@@ -1,11 +1,9 @@
 using IsDef
-using IRTools
 using Test
-# using Documenter
+using Documenter
 import FunctionWrappers: FunctionWrapper
 
-# @test isempty(detect_ambiguities(IsDef))  # crashes whole Julia
-
+@test isempty(detect_ambiguities(IsDef))
 
 # test apply
 # ----------
@@ -25,6 +23,7 @@ import FunctionWrappers: FunctionWrapper
 
 function ifelse2(t, a, b)
     println("before")
+    t = !t
     if t
         println("a = $a")
         a
@@ -34,24 +33,32 @@ function ifelse2(t, a, b)
     end
 end
 
-@test Out(ifelse2, Bool, Int, String) == Union{Int, String}
-@test Out(ifelse2, true, Int, String) == Int
-@test Out(ifelse2, false, Int, String) == String
+@test @inferred(Out(ifelse2, Bool, Int, String)) == Union{Int, String}
+@test Out((a, b) -> ifelse2(false, a, b), Int, String) == Int  # no infer, because it fails the first time
+@test @inferred(Out((a, b) -> ifelse2(true, a, b), Int, String)) == String
 
-function gettoknowirtools(a, b)
-    sum = 0
-    for i in 1:a
-        add = if isodd(i)
-            5
-        else
-            9
-        end
-        sum += i + add
+
+# TODO we need to run things twice for the inference to work here
+# for updates see https://github.com/JuliaLang/julia/issues/46557#issuecomment-1326278531
+
+function ifelse2(t, a, b)
+    println("before")
+    t = !t
+    if t
+        println("a = $a")
+        a
+    else
+        println("b = $b")
+        b
     end
-    return a, b
 end
 
-function applyinnerfunc(a, b)
+@test @inferred(Out(ifelse2, Bool, Int, String)) == Union{Int, String}
+@test @inferred(Out((a, b) -> ifelse2(false, a, b), Int, String)) == Int
+@test @inferred(Out((a, b) -> ifelse2(true, a, b), Int, String)) == String
+
+
+function forloop_simple(a, b)
     sum = 0
     for i in 1:a
         sum += i
@@ -59,125 +66,29 @@ function applyinnerfunc(a, b)
     return a, b
 end
 
-Out(applyinnerfunc, Int, String)
+@test @inferred(Out(forloop_simple, Int, String)) == Tuple{Int, String}
 
-
-applyinnerfunc(2, "hi")
-
-IsDef.Out_implementation(Tuple{typeof(applyinnerfunc), Int, String})
-using IsDef.Utils: TypeLevel, Tuple_value_to_type, dynamointernals_innervalue_to_types, dynamointernals_ensure_innervalue, signature_without_typevalues
-IsDef._Out_dynamo_implementation(Tuple{typeof(applyinnerfunc), Int64, String}, TypeLevel(typeof(applyinnerfunc)), TypeLevel(Int64), TypeLevel(String))
-
-function _dynamointernals_innervalue_to_types_ANDTHEN_Out_ANDTHEN_dynamointernals_ensure_innervalue(args...)
-    args′ = Tuple_value_to_type(dynamointernals_innervalue_to_types(args))
-    dynamointernals_ensure_innervalue(Out(args′))
-end
-  
-
-Out(Main.:(:), 1, 2)
-
-args = (Main.:(:), 1, 2)
-args′ = Tuple_value_to_type(dynamointernals_innervalue_to_types(args))
-result = Out(args′)
-
-IsDef.revise!()
-
-sigtype_notypevalues = signature_without_typevalues(args′)
-# functions which consists purely out of Base/Core stuff are handled by falling back to Core.Compiler.return_type
-# we need to make sure, that this is not too general, hence we check whether the to be called methods are too generic
-all(_isleaf, fieldtypes(sigtype_notypevalues))
-mts = covering_method_instances(sigtype_notypevalues)
-length(mts) > 1 && error(
-    "not sure what this is about. Found several matching method instances. Probably an ambiguity error. methods = $mts"
-)
-method_instance = only(mts)
-  
-
-@code_lowered Out(args′)
-
-IsDef.Out_implementation(args′)
-mark_typelevel_or_typevalue(result)
-
-
-using IRTools
-ir = @code_ir applyinnerfunc(4, :hi)
-
-IsDef.keep_only_what_is_explicitly_used!(ir)
-
-IsDef.lift_ifelse!(ir)
-
-
-ir = IsDef.Out_implementation(Tuple{typeof(applyinnerfunc), Int, String})
-
-IRTools.evalir(ir, Tuple{}, applyinnerfunc, Bool, Int, String)
-
-ir_original = @code_ir applyinnerfunc(1, 2)
-@show ir_original
-
-ir = @code_ir applyinnerfunc(1, 2)
-
-IRTools.Inner.blockidx(ir, IRTools.Variable(8))
-bs = IRTools.blocks(ir)
-
-
-IsDef.lift_ifelse!(ir)
-
-
-
-
-all_ifelse = Set{IRTools.Variable}()
-block, state_block = iterate(IsDef.iterateblocks(ir))
-block, state_block = iterate(IsDef.iterateblocks(ir), state_block)
-
-branch, state_branch = iterate(IRTools.branches(block))
-branch, state_branch = iterate(IRTools.branches(block), state_branch)
-
-condition_var = branch.condition
-# skip over unconditional or return branches
-@show isnothing(condition_var)
-# skip over already handled var
-@show condition_var ∈ all_ifelse
-
-haskey(ir, condition_var)
-
-# it might be that the condition_var is just an argument and if so won't have an expression mapped to it
-if haskey(ir, condition_var)
-# skip over isbooltype conditions, they are safe as we introduce them right here
-condition_statement = ir[condition_var]
-using ExprParsers
-@show EP.isexpr(condition_statement.expr, :call) && condition_statement.expr.args[1] === IsDef.isbooltype
+function forloop_complex(a, b)
+    h = nothing
+    for i in 1:5
+        if isodd(i)
+            h = a
+        else
+            h = b
+        end
+    end
+    h
 end
 
-# support Bool
-IsDef.lift_ifelse!(ir, condition_var)
-push!(all_ifelse, condition_var)
-@debug "ifelse $(condition_var) - ir after = $ir"
+@test @inferred(Out(forloop_complex, Int, String)) == Union{Int, String}
 
 
+@test @inferred(Out(Main.:(:), Int, Int)) == UnitRange{Int64}
+@test @inferred(Out(() -> 1:2)) == UnitRange{Int64}
+@test @inferred(Out(Tuple{typeof(Main.:(:)), ValTypeof(1), ValTypeof(2)})) == UnitRange{Int64}
 
-
-
-# -----------
-
-
-IsDef.inline_all_blocks_with_arguments!(IRTools.blocks(ir)[2:end])
-
-IsDef.lift_ifelse!(ir)
-ir
-
-
-
-getval(t) ? a : b
-
-@test Out(Base.map, typeof(x->2x), Vector{Int}) == Vector{Int}  # TODO continue with Out(typeof)
-
-@test isdef(Base.reduce, typeof(+), Vector{<:Number})
-Base.Generator
-
-# Caution!! Core.Compiler.return_type is actually not always as good as expected:
-# this by now actually inferes correctly...
-# Base.promote_op(Base.reduce, typeof(+), Vector{String}) === Union{}
-
+@test @inferred(Out(Base.map, typeof(x->2x), Vector{Int})) == Vector{Int}
+@test @inferred(Out(Base.map, typeof(x->2.5x), Vector{Int})) == Vector{Float64}
 
 # works transparent with wrappers (unlike Base.`which`)
 wrapper(args...; kwargs...) = original(args...; kwargs...)
@@ -187,15 +98,11 @@ original(a::Int, b::String) = true
 
 
 
-# does even work on compiler level
-@test Out(Out, typeof(Base.map), typeof(x->2x), Vector{Int}) == Type{Vector{Int}}
-
-
 # works in a strict open sense only with Any (would have to work for a whole newtype)
 # for everything else the concrete leave-types are used
 f(a) = a + a
 # we decided to leave Any as is, not going to newtype, and hence Any says often yes instead of no
-@test isdef(f, Any)
+@test !isdef(f, Any)
 @test isdef(f, Number)
 @test isdef(f, Integer)
 @test !isdef(f, String)
@@ -210,11 +117,11 @@ f(a) = a + a
 
 
 # test types
-@test Out(Some, Int) == Some{Int}
+@test @inferred(Out(Some, Int)) == Some{Int}
 @test isdef(Some, Int)
 
 # test values
-@test Out(sin, 1) == Float64
+@test @inferred(Out(sin, ValTypeof(1))) == Float64
 @test isdef(sin, 1)
 
 
@@ -223,8 +130,6 @@ f(a) = a + a
 
 @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(sin), Int) == Val{true}
 
-using IsDef
-using Test
 mywrapper(args...) = myfunc(args...)
 myfunc(::BigFloat) = "big"
 myfunc(::Float16) = 16
@@ -233,20 +138,14 @@ myfunc(::Float32) = 32
 @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), BigFloat) == Val{true}
 @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), Float16) == Val{true}
 @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), Float32) == Val{true}
-
-# TODO unfortunately type inference does not work through Union, which is surprising
-# inspecting the issue further it turns out that type-inference is extremely unstable, putting things into functions
-# instead of doing them at the REPL may influence type-inference to the worse...
-# better not to do much with type-inference
-
-# @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), AbstractFloat) == Val{false}
-
+@test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), AbstractFloat) == Val
 
 
 # test documentation
 # ------------------
 
-doctest(IsDef)
 @test Out(Base.map, typeof(string), Vector{Int}) == Vector{String}
 @test Out(Base.map, typeof(isodd), Vector{Int}) == Vector{Bool}
 @test Out(Base.map, FunctionWrapper{Bool, Tuple{Any}}, Vector{Int}) == Vector{Bool}
+
+doctest(IsDef)

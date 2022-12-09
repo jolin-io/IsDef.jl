@@ -34,7 +34,7 @@ TODO it should be `Tuple{map(Core.Typeof, tuple(T.parameters...))}(tuple(T.param
 however this destroys type information as of now, see https://discourse.julialang.org/t/tuple-constructor-forgets-types/65730
 i.e. we use the simpler version as of now
 """
-Tuple_type_to_value(::Type{T}) where T<:Tuple = tuple(T.parameters...)  
+Tuple_type_to_value(::Type{T}) where T<:Tuple = tuple(T.parameters...)
 Tuple_value_to_type(mytuple::Tuple) = Tuple{mytuple...}
 
 function NamedTuple_value_to_type(namedtuple::NT) where NT<:NamedTuple

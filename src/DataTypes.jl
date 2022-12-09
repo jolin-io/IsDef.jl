@@ -1,5 +1,5 @@
 module DataTypes
-export NotApplicable, TypeLevelFunction, IntrinsicFunction
+export NotApplicable, TypeValueFunction, IntrinsicFunction
 
 
 # we decided to use type-level because `Out` normally returns types.
@@ -12,7 +12,7 @@ isapplicable(::Type{NotApplicable}) = false
 isapplicable(other) = true
 
 
-struct TypeLevelFunction{F} <: Function
+struct TypeValueFunction{F} <: Function
   func::F
 end
 
