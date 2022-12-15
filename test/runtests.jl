@@ -17,29 +17,8 @@ import FunctionWrappers: FunctionWrapper
 @test @inferred(Out(x -> 2x, Int)) == Int
 @test @inferred(Out(x -> 2.3x, Int)) == Float64
 
-
 # test ifelse
 # -----------
-
-function ifelse2(t, a, b)
-    println("before")
-    t = !t
-    if t
-        println("a = $a")
-        a
-    else
-        println("b = $b")
-        b
-    end
-end
-
-@test @inferred(Out(ifelse2, Bool, Int, String)) == Union{Int, String}
-@test Out((a, b) -> ifelse2(false, a, b), Int, String) == Int  # no infer, because it fails the first time
-@test @inferred(Out((a, b) -> ifelse2(true, a, b), Int, String)) == String
-
-
-# TODO we need to run things twice for the inference to work here
-# for updates see https://github.com/JuliaLang/julia/issues/46557#issuecomment-1326278531
 
 function ifelse2(t, a, b)
     println("before")
@@ -84,8 +63,8 @@ end
 
 
 @test @inferred(Out(Main.:(:), Int, Int)) == UnitRange{Int64}
-@test @inferred(Out(() -> 1:2)) == UnitRange{Int64}
-@test @inferred(Out(Tuple{typeof(Main.:(:)), ValTypeof(1), ValTypeof(2)})) == UnitRange{Int64}
+@test @inferred(Out(() -> 1:2)) == ValTypeof(1:2)
+@test @inferred(Out(Tuple{typeof(Main.:(:)), ValTypeof(1), ValTypeof(2)})) == ValTypeof(1:2)
 
 @test @inferred(Out(Base.map, typeof(x->2x), Vector{Int})) == Vector{Int}
 @test @inferred(Out(Base.map, typeof(x->2.5x), Vector{Int})) == Vector{Float64}
@@ -93,9 +72,15 @@ end
 # works transparent with wrappers (unlike Base.`which`)
 wrapper(args...; kwargs...) = original(args...; kwargs...)
 original(a::Int, b::String) = true
+
+@test @inferred(Out(original, Int, String)) == ValTypeof(true)
+
+@test Out(wrapper, Int, String) == ValTypeof(true)
+# TODO this does not yet infer... we never tested this actually
+@test_skip @inferred(Out(wrapper, Int, String)) == ValTypeof(true)
+
 @test isdef(wrapper, Int, String)
 @test !isdef(wrapper, Float64)
-
 
 
 # works in a strict open sense only with Any (would have to work for a whole newtype)

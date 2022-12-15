@@ -1,5 +1,5 @@
 using IsDef.Utils.TypeUtils: IntrinsicFunction
-using IsDef.Utils.TypeValues: ValType, ValTypeof
+using IsDef.Utils.ValTypes: ValType, ValTypeof
 
 # bitcast
 # -------

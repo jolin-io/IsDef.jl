@@ -1,4 +1,4 @@
-using IsDef.Utils.TypeValues: promote_type_or_val, ValType, ValTypeof
+using IsDef.Utils.ValTypes: promote_type_or_valtype, ValType, ValTypeof
 
 # Bool operations
 # ---------------
@@ -6,10 +6,10 @@ using IsDef.Utils.TypeValues: promote_type_or_val, ValType, ValTypeof
 # operators with 2 arguments
 
 function Out(::Type{Tuple{F, T1, T2}}) where {F <: Union{typeof(<), typeof(>), typeof(<=), typeof(>=)}, T1, T2}
-  _Out_comparison(F, T1, T2)
+    _Out_comparison(F, T1, T2)
 end
 @generated function _Out_comparison(::Type{F}, ::Type{T1}, ::Type{T2}) where {F<:Function, T1<:ValType, T2<:ValType}
-  ValTypeof(F.instance(get(T1), get(T2)))
+    ValTypeof(F.instance(get(T1), get(T2)))
 end
 _Out_comparison(::Type, ::Type, ::Type) = Bool
 
@@ -23,16 +23,16 @@ Out(::Type{Tuple{typeof(!), Bool}}) = Bool
 # ---------------
 
 function Out(signature_typevalues::Type{Tuple{typeof(promote_type), Type{T1}, Type{T2}}}) where {T1, T2}
-  # TODO hassignature cannot handle ValType types currently
-  signature_notypevalues = signature_without_typevalues(signature_typevalues)
-  static_hasmethod(signature_notypevalues) || return NotApplicable  # TODO: we are assuming that if there is a method, it also works
-  Core.Typeof(promote_type(T1, T2))
+    # TODO hassignature cannot handle ValType types currently
+    signature_notypevalues = signature_without_valtypes(signature_typevalues)
+    static_hasmethod(signature_notypevalues) || return NotApplicable  # TODO: we are assuming that if there is a method, it also works
+    Core.Typeof(promote_type_or_valtype(T1, T2))
 end
 
 function Out(::Type{Tuple{typeof(convert), Type{T1}, T2}}) where {T1, T2}
-  signature_notypevalues = signature_without_typevalues(signature_typevalues)
-  static_hasmethod(signature_notypevalues) || return NotApplicable  # TODO: we are assuming that if there is a method, it also works
-  T1
+    signature_notypevalues = signature_without_valtypes(signature_typevalues)
+    static_hasmethod(signature_notypevalues) || return NotApplicable  # TODO: we are assuming that if there is a method, it also works
+    T1
 end
 
 
@@ -44,18 +44,11 @@ end
 # ...
 
 function Out(::Type{Tuple{typeof(map), F, A}}) where {F, A}
-  new_element_type = Out(apply, F, eltype(A))
-  new_element_type !== NotApplicable || return NotApplicable
-  Out(Tuple{typeof(similar), A, Type{new_element_type}})
+    new_element_type = Out(apply, F, eltype(A))
+    new_element_type !== NotApplicable || return NotApplicable
+    Out(Tuple{typeof(similar), A, Type{new_element_type}})
 end
 
-
-# isempty
-# .......
-
-# Core.Compiler.return_type of course returns Bool, because it always needs to return a type
-# Out(::Type{Tuple{typeof(isempty), NamedTuple{(), Tuple{}}}}) = true
-# Out(::Type{Tuple{typeof(isempty), Tuple{}}}) = true
 
 # iterate
 # .......

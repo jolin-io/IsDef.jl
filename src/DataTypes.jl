@@ -5,7 +5,7 @@ export NotApplicable, TypeValueFunction, IntrinsicFunction
 # we decided to use type-level because `Out` normally returns types.
 # hence it is more intuitive to use type, but also more natural, as `Out` may be used within type range as `Out(f, ...) <: NotApplicable`.
 struct NotApplicable
-  NotApplicable() = error("Please use `NotApplicable` type instead of `NotApplicable()` instance.")
+    NotApplicable() = error("Please use `NotApplicable` type instead of `NotApplicable()` instance.")
 end
 
 isapplicable(::Type{NotApplicable}) = false
@@ -13,7 +13,7 @@ isapplicable(other) = true
 
 
 struct TypeValueFunction{F} <: Function
-  func::F
+    func::F
 end
 
 end

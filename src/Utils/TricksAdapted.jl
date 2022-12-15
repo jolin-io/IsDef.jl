@@ -3,11 +3,13 @@ module TricksAdapted
 using Base: rewrap_unionall, unwrap_unionall, uncompressed_ast
 using Base: CodeInfo
 
-export static_hasmethod, covering_method_instances
+export static_hasmethod, static_hasnomethod, covering_method_instances
 
 # This is used to create the CodeInfo returned by static_hasmethod.
 _hasmethod_false(@nospecialize(t)) = false
 _hasmethod_true(@nospecialize(t)) = true
+
+static_hasnomethod(::Type{T}) where {T<:Tuple} = !static_hasmethod(T)
 
 """
     static_hasmethod(sig_tuple::Type{<:Tuple)

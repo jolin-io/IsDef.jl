@@ -1,4 +1,4 @@
-using IsDef.Utils.TypeValues: ValType, ValTypeof
+using IsDef.Utils.ValTypes: ValType, ValTypeof
 
 # typeof(===)
 # -----------
@@ -37,14 +37,16 @@ end
 # getfield
 # --------
 
-function Out(::Type{Tuple{typeof(getfield), Typ, FieldTyp}}) where {Typ, FieldTyp}
-    _Core_return_type(getfield, Tuple{Typ, Field})
+function Out(::Type{T}) where T <: Tuple{typeof(getfield), Any, Any}
+    Core_return_type(T)
 end
-function Out(::Type{Tuple{typeof(getfield), Typ, FieldTyp}}) where {Typ, FieldTyp <: ValType}
-    # while this does not work with anonymous functions, type-inference indeed works with this little helper
-    _Core_return_type(typedgetfield, Tuple{Typ, FieldTyp})
-end
-typedgetfield(x, ::ValType{_T, field}) where {_T, field} = getfield(x, field)
+
+# TODO really not needed?
+# function Out(::Type{Tuple{typeof(getfield), Typ, FieldTyp}}) where {Typ, FieldTyp <: ValType}
+#     # while this does not work with anonymous functions, type-inference indeed works with this little helper
+#     _Core_return_type(typedgetfield, Tuple{Typ, FieldTyp})
+# end
+# typedgetfield(x, ::ValType{_T, field}) where {_T, field} = getfield(x, field)
 
 
 
@@ -57,15 +59,6 @@ _Out_isa(::Type{Instance}, ::Type{Type{UpperBound}}) where {Instance, UpperBound
 _Out_isa(::Type{Instance}, ::Type{Typ}) where {Instance, Typ} = Instance isa Typ
 _Out_isa(::TypeValue, ::Type{Type{UpperBound}}) where {TypeValue, UpperBound} = TypeValue <: UpperBound
 _Out_isa(::TypeValue, ::Type{Typ}) where {TypeValue, Typ} = TypeValue isa Typ
-
-
-# _Out_isa(::Type{Instance}, ::Type{Type{UpperBound}}) where {UpperBound, Instance <: UpperBound} = true
-# _Out_isa(::Type{Instance}, ::Type{Type{UpperBound}}) where {UpperBound, Instance} = false
-# _Out_isa(::Type{Instance}, ::Type{Typ}) where {Instance, Typ} = Instance isa Typ
-# _Out_isa(::TypeValue, ::Type{Type{UpperBound}}) where {UpperBound, TypeValue <: UpperBound} = true
-# _Out_isa(::TypeValue, ::Type{Type{UpperBound}}) where {UpperBound, TypeValue} = false
-# _Out_isa(::TypeValue, ::Type{Typ}) where {TypeValue, Typ} = TypeValue isa Typ
-
 
 
 # Core.apply_type
@@ -135,14 +128,12 @@ julia> @code_ir f([1,2])
 @generated function Out(::Type{Signature}) where {Func, Signature <: Tuple{typeof(Core._apply_iterate), typeof(iterate), Func, Vararg}}
     # `func(mytuple...)` is translated to `Core._apply_iterate(iterate, func, mytuple)`
     # similarly we translate the typeinference
-    Core.println("Out Signature = $Signature")
+
     _apply_iterate, rest1 = signature_split_first(Signature)
     _iterate, rest2 = signature_split_first(rest1)
     _func, args = signature_split_first(rest2)
-    Core.println("Out _apply_iterate func = $Func, args = $args")
     # some Tuples may be typevalues themselves, as Tuples of typevalues actually count as typevalues
     args′ = map(ensure_Tuple_type, Tuple_type_to_value(args))
-    Core.println("Out _apply_iterate func = $Func, args = $args, args′ = $args′")
     if all(arg -> isa(arg, Type{<:Tuple}), args′)
         new_signature = concat_Tuples(Tuple{Func}, args′...)
         :(IsDef.Out($new_signature))
