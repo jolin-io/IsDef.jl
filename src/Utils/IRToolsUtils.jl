@@ -2,7 +2,7 @@ module IRToolsUtils
 
 export new_out, irargs_to_signature, signature_to_irargs, type_to_irvalue, irvalue_to_type, detect_cycle, keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
 
-using IsDef.DataTypes: NotApplicable, TypeValueFunction
+using IsDef.DataTypes: NotApplicable, UnsureWhetherApplicable, ApplicabilityProblem, isapplicable, TypeValueFunction
 using IsDef.Utils.ValTypes: isvaltypevalue, ValType, ValTypeof, Typeof
 using IsDef.Utils.TypeUtils: IntrinsicFunction, Tuple_value_to_type, Tuple_type_to_value, NamedTuple_value_to_type
 
@@ -53,6 +53,7 @@ type_to_irvalue(single::TypeLevel) = single
 type_to_irvalue(single) = isvaltypevalue(single) ? single : TypeLevel(single)
 type_to_irvalue(single::ValType{T, Value}) where {T, Value} = Value
 type_to_irvalue(single::Type{ValType{T, Value}}) where {T, Value} = Value
+type_to_irvalue(::Type{T}) where {T<:ApplicabilityProblem} = T
 
 
 irvalue_to_type(a::TypeLevel) = a.value
@@ -63,6 +64,8 @@ irvalue_to_type(a::NamedTuple) = NamedTuple_value_to_type(map(irvalue_to_type, a
 irvalue_to_type(a) = Typeof(a)
 # TODO is this special handling of intrinsic functions still needed?
 irvalue_to_type(a::Core.IntrinsicFunction) = IntrinsicFunction{a}
+irvalue_to_type(::Type{T}) where {T<:ApplicabilityProblem} = T
+
 
 function irargs_to_signature(args...)
     Tuple_value_to_type(map(irvalue_to_type, args))
@@ -227,6 +230,9 @@ end
 # shortcylce
 # ----------
 
+is_applicability_problem(_) = false
+is_applicability_problem(::Type{<:ApplicabilityProblem}) = true
+
 @doc raw"""
         shortcycle_if_notapplicable_error!(ir::IRTools.IR, var::IRTools.Variable)
 
@@ -277,9 +283,9 @@ julia> IRTools.func(ir_g)(g, "hi")
 ```
 """
 function shortcycle_if_notapplicable!(ir::IRTools.IR, var::IRTools.Variable)
-    condition = xcall(===, var, TypeLevel(NotApplicable))
+    condition = xcall(is_applicability_problem, var)
     shortcycle_after_var_if_condition!(ir, var, condition) do shortcycle_block, _continuation_block, _blockid_mapping, _var_is_condition
-        IRTools.return!(shortcycle_block, NotApplicable)
+        IRTools.return!(shortcycle_block, var)
     end
 end
 

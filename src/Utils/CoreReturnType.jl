@@ -2,7 +2,7 @@ module CoreReturnType
 
 export Core_return_type
 
-using IsDef: NotApplicable, IsDef
+using IsDef: IsDef, NotApplicable, UnsureWhetherApplicable
 using IsDef.Utils.ValTypes: ValType, valtype_apply, isvaltypevalue, signature_without_valtypes
 
 
@@ -61,7 +61,6 @@ function Core_return_type(::Type{signature_valtypes}) where signature_valtypes <
 
         if !called_from_within_isdef
             signature_novaltypes = signature_without_valtypes(signature_valtypes)
-
             Core.println(Core.stderr,
                 """WARNING: We falled back to using Core.Compiler.return_type,
                 however the inference returned a non-concrete type $(ret), which means that
@@ -73,8 +72,10 @@ function Core_return_type(::Type{signature_valtypes}) where signature_valtypes <
                 """
             )
         end
+        return UnsureWhetherApplicable
+    else
+        return ret
     end
-    return ret
 end
 
 end # module

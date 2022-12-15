@@ -44,9 +44,16 @@ end
 # ...
 
 function Out(::Type{Tuple{typeof(map), F, A}}) where {F, A}
-    new_element_type = Out(apply, F, eltype(A))
-    new_element_type !== NotApplicable || return NotApplicable
-    Out(Tuple{typeof(similar), A, Type{new_element_type}})
+    eltypeA = eltype(A)
+    if eltypeA == Any
+        # if the eltype is Any, it is usually better to use Core_return_type
+        # TODO however this makes Out on map less reliable
+        return IsDef.Core_return_type(Tuple{typeof(map), F, A})
+    else
+        new_element_type = Out(apply, F, eltypeA)
+        new_element_type !== NotApplicable || return NotApplicable
+        return Out(Tuple{typeof(similar), A, Type{new_element_type}})
+    end
 end
 
 

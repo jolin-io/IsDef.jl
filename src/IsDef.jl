@@ -2,7 +2,7 @@ module IsDef
 using Reexport
 export apply
 export isdef, Out, Out′
-export NotApplicable, isapplicable
+export ApplicabilityProblem, NotApplicable, UnsureWhetherApplicable, isapplicable
 export promote_type_or_valtype, ValType, ValTypeof
 
 using Compat

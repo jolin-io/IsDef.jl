@@ -24,7 +24,11 @@ function Out(::Type{signature_typevalues}) where {signature_typevalues <: Tuple{
     return func(args...)
 end
 
-const TOO_GENERIC_TYPES = (Any, Function, Type, Module)
+const TOO_GENERIC_TYPES = begin
+    types = (Any, Function, Type, Module)
+    types_vararg = map(T -> Vararg{T}, types)
+    tuple(types..., types_vararg...)
+end
 
 
 function Out(::Type{signature_typevalues}) where {signature_typevalues <: Tuple{Core.Builtin, Vararg}}
@@ -61,8 +65,13 @@ function _Out_dynamo_expr(function_name=:Out; isdynamo=true)
             )
             if !isempty(mts)
                 method_instance = only(mts)
-
-                found_generic_base_function = any(t -> t ∈ TOO_GENERIC_TYPES, fieldtypes(method_instance.def.sig))
+                Core.println("method_instance.def.sig = $(method_instance.def.sig)")
+                parameters = if isa(method_instance.def.sig, UnionAll)
+                    fieldtypes(method_instance.def.sig)
+                else
+                    method_instance.def.sig.parameters
+                end
+                found_generic_base_function = any(t -> t ∈ TOO_GENERIC_TYPES, parameters)
                 found_generic_base_function && Core.println(Core.stderr, """
                     WARNING: Recursed to a generic leaf function (everything is from Base or Core, and found at least one too generic type $TOO_GENERIC_TYPES).
 
@@ -165,7 +174,6 @@ function _Out_dynamo_expr(function_name=:Out; isdynamo=true)
             branch_last = IRTools.branches(block)[end]
             IRTools.isreturn(branch_last) || continue
             var_return = IRTools.returnvalue(branch_last)
-            var_return !== NotApplicable || continue
             var_return_new = push!(block, xcall(irvalue_to_type, var_return))
             branch_last.args[1] = var_return_new
         end

@@ -76,8 +76,7 @@ original(a::Int, b::String) = true
 @test @inferred(Out(original, Int, String)) == ValTypeof(true)
 
 @test Out(wrapper, Int, String) == ValTypeof(true)
-# TODO this does not yet infer... we never tested this actually
-@test_skip @inferred(Out(wrapper, Int, String)) == ValTypeof(true)
+@test @inferred(Out(wrapper, Int, String)) == ValTypeof(true)
 
 @test isdef(wrapper, Int, String)
 @test !isdef(wrapper, Float64)
@@ -87,17 +86,38 @@ original(a::Int, b::String) = true
 # for everything else the concrete leave-types are used
 f(a) = a + a
 # we decided to leave Any as is, not going to newtype, and hence Any says often yes instead of no
+@test @inferred(Out(f, Any)) == NotApplicable
 @test !isdef(f, Any)
-@test isdef(f, Number)
-@test isdef(f, Integer)
+
+@test @inferred(Out(f, Number)) == UnsureWhetherApplicable
+@test !isdef(f, Number)
+
+@test @inferred(Out(f, Integer)) == UnsureWhetherApplicable
+@test !isdef(f, Integer)
+
+@test @inferred(Out(f, String)) == NotApplicable
 @test !isdef(f, String)
+
+@test @inferred(Out(f, AbstractString)) == NotApplicable
 @test !isdef(f, AbstractString)
+
+@test @inferred(Out(f, Vector{<:String})) == UnsureWhetherApplicable
 @test !isdef(f, Vector{<:String})
+
+@test @inferred(Out(f, Vector{<:AbstractString})) == UnsureWhetherApplicable
 @test !isdef(f, Vector{<:AbstractString})
 
-@test isdef(Base.map, typeof(x -> x+4), Array{<:Number, 3})
+
+@test @inferred(Out(Base.map, typeof(x -> x+4), Array{<:Number, 3})) == UnsureWhetherApplicable
+@test !isdef(Base.map, typeof(x -> x+4), Array{<:Number, 3})
+
+@test @inferred(Out(Base.map, typeof(x -> x+4), Vector{String})) == NotApplicable
 @test !isdef(Base.map, typeof(x -> x+4), Vector{String})
+
+@test @inferred(Out(Base.map, typeof(x -> x+4), Vector{AbstractString})) == NotApplicable
 @test !isdef(Base.map, typeof(x -> x+4), Vector{AbstractString})
+
+@test @inferred(Out(Base.map, typeof(x -> x+4), Vector{<:AbstractString})) == UnsureWhetherApplicable
 @test !isdef(Base.map, typeof(x -> x+4), Vector{<:AbstractString})
 
 
@@ -106,12 +126,12 @@ f(a) = a + a
 @test isdef(Some, Int)
 
 # test values
-@test @inferred(Out(sin, ValTypeof(1))) == Float64
+@test @inferred(Out(sin, ValTypeof(1))) <: ValType{Float64}
 @test isdef(sin, 1)
 
 
-# test inference
-# --------------
+# test inference on isdef
+# -----------------------
 
 @test Base.promote_op((args...) -> Val(isdef(args...)), typeof(sin), Int) == Val{true}
 
