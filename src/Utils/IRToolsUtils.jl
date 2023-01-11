@@ -2,8 +2,8 @@ module IRToolsUtils
 
 export new_out, irargs_to_signature, signature_to_irargs, type_to_irvalue, irvalue_to_type, detect_cycle, keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
 
-using IsDef.DataTypes: NotApplicable, UnsureWhetherApplicable, ApplicabilityProblem, isapplicable, TypeValueFunction
-using IsDef.Utils.ValTypes: isvaltypevalue, ValType, ValTypeof, Typeof
+using IsDef.Utils.Applicabilities: NotApplicable, UnsureWhetherApplicable, ApplicabilityProblem, isapplicable
+using IsDef.Utils.ValTypes: isvaltypevalue, ValType, ValTypeof, Typeof, ValTypeFunction
 using IsDef.Utils.TypeUtils: IntrinsicFunction, Tuple_value_to_type, Tuple_type_to_value, NamedTuple_value_to_type
 
 using Setfield
@@ -259,21 +259,24 @@ g (generic function with 1 method)
 
 julia> ir_g = @code_ir g(1)
 1: (%1, %2)
-    %3 = Main.foo(%2)
-    %4 = Base.string("foo(x) = ", %3)
-    %5 = Base.string("y = ", %4)
-    return %5
+  %3 = foo(%2)
+  %4 = Base.string("foo(x) = ", %3)
+  %5 = Base.string("y = ", %4)
+  return %5
 
 julia> IsDef.shortcycle_if_notapplicable!(ir_g, IRTools.var(3))
+%8
+
+julia> ir_g
 1: (%1, %2)
-    %3 = Main.foo(%2)
-    %8 = (===)(%3, NotApplicable)
-    br 2 unless %8
-    return IsDef.NotApplicable
+  %3 = foo(%2)
+  %8 = (IsDef.Utils.IRToolsUtils.is_applicability_problem)(%3)
+  br 2 unless %8
+  return %3
 2:
-    %4 = Base.string("foo(x) = ", %3)
-    %5 = Base.string("y = ", %4)
-    return %5
+  %4 = Base.string("foo(x) = ", %3)
+  %5 = Base.string("y = ", %4)
+  return %5
 
 julia> IRTools.func(ir_g)(g, 3)
 NotApplicable
@@ -373,7 +376,7 @@ function lift_ifelse!(ir::IRTools.IR)
 end
 
 function lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse::IRTools.Variable)
-    condition = xcall(TypeValueFunction(isbooltype), var_ifelse)
+    condition = xcall(ValTypeFunction(isbooltype), var_ifelse)
 
     # we need to copy before doing shortcycling,
     # because within shortcycling do-block the ir is in a corrupt intermediate state
@@ -512,7 +515,7 @@ function insert_Union_into_returns_step2_ifnotbranch(ifnot_block, T, visited_blo
         else # return branch
             # finally we can combine the two strengths
             i_endofblock = length(IRTools.BasicBlock(ifnot_block).stmts)
-            newreturnexpr = xcall(TypeValueFunction(create_union), T, only(branch.args))
+            newreturnexpr = xcall(ValTypeFunction(create_union), T, only(branch.args))
             newreturnvariable = insert!(ifnot_block, i_endofblock+1, newreturnexpr)
             branch.args[1] = newreturnvariable
             # if we encounter multiple return, we ignore those which are never called

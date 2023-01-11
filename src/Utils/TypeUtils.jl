@@ -8,6 +8,8 @@ export NamedTuple_type_to_value, NamedTuple_value_to_type, NamedTupleEmpty
 export IntrinsicFunction
 export isleaf_type
 
+using Crayons.Box
+
 split_typevar(base) = base, TypeVar[]
 function split_typevar(t::UnionAll)
     base, typevars = split_typevar(t.body)
@@ -74,7 +76,7 @@ function isleaf_type(type)
 end
 
 function isleaf_type(::Type{Core.Const})
-    Core.println(Core.stderr, "WARNING: Found Core.Const and regarding it as leaf type is probably wrong")
+    Core.println(Core.stderr, "$(YELLOW_FG("Warning:")) Found Core.Const and regarding it as leaf type is probably wrong")
     true
 end
 

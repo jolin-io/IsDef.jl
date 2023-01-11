@@ -3,7 +3,50 @@ using Test
 using Documenter
 import FunctionWrappers: FunctionWrapper
 
+include("IOUtils.jl")
+using .IOUtils: redirect_stdoutio, redirect_stderrio
+
 @test isempty(detect_ambiguities(IsDef))
+
+# test output suppression
+# -----------------------
+
+iobuffer = IOBuffer()
+function my_print_warnings()
+    IsDef.Utils.is_suppress_warnings() || Core.println("no suppress_warnings")
+    IsDef.Utils.is_suppress_warnings_or_isdef() || Core.println("neither suppress_warnings nor isdef")
+end
+
+
+# test `suppress_warnings`
+
+redirect_stdoutio(iobuffer) do
+    my_print_warnings()
+end
+@test String(take!(iobuffer)) == """no suppress_warnings
+neither suppress_warnings nor isdef
+"""
+
+redirect_stdoutio(iobuffer) do
+    IsDef.suppress_warnings() do
+        my_print_warnings()
+    end
+end
+@test String(take!(iobuffer)) == ""
+
+
+# test `isdef` suppression
+
+redirect_stderrio(iobuffer) do
+    Out(+, Number, Number)
+end
+@test String(take!(iobuffer)) != ""
+
+redirect_stderrio(iobuffer) do
+    isdef(+, Number, Number)
+end
+@test String(take!(iobuffer)) == ""
+
 
 # test apply
 # ----------

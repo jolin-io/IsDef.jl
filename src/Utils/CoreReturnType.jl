@@ -2,14 +2,20 @@ module CoreReturnType
 
 export Core_return_type
 
-using IsDef: IsDef, NotApplicable, UnsureWhetherApplicable
+using IsDef: IsDef
+using IsDef.Utils.Applicabilities: NotApplicable, UnsureWhetherApplicable
 using IsDef.Utils.ValTypes: ValType, valtype_apply, isvaltypevalue, signature_without_valtypes
-
+using IsDef.Utils.IOUtils: is_suppress_warnings, is_suppress_warnings_or_isdef
+using Crayons.Box
 
 is_union_or_concretetype_or_union_of_concretetypes(type) = isconcretetype(type)
 is_union_or_concretetype_or_union_of_concretetypes(::typeof(Union{})) = true
 function is_union_or_concretetype_or_union_of_concretetypes(type::Union)
     isconcretetype(type.a) && is_union_or_concretetype_or_union_of_concretetypes(type.b)
+end
+
+function is_possibly_inaccurate_typeinference(type)
+    !is_union_or_concretetype_or_union_of_concretetypes(type)
 end
 
 ValType_totype(::Type{<:ValType{Typ, Value}}) where {Typ, Value} = ValType{Typ, Value}
@@ -34,10 +40,14 @@ end
 function Core_return_type(::Type{signature_valtypes}) where signature_valtypes <: Tuple
 
     _ret = Core.Compiler.return_type(_myvaltype_apply, signature_valtypes)
-
-    # extract ValType information
     ret = if _ret isa typeof(Union{})
         NotApplicable
+    elseif _ret === ValType
+        # for some cases like `Tuple{typeof(/), Int64, Union{Float32, Int64}}` we
+        # get a Union of valtypes, like `Union{Float32, Float64}`, which unfortunately
+        # get interpreted as the UnionAll ValType by our special `_myvaltype_apply` function
+        # extract ValType information
+        Core.Compiler.return_type(valtype_apply, signature_valtypes)
     elseif _ret <: ValType
         ValType_totype(_ret)
     elseif _ret isa Union
@@ -46,29 +56,21 @@ function Core_return_type(::Type{signature_valtypes}) where signature_valtypes <
         _ret
     end
 
-    if !is_union_or_concretetype_or_union_of_concretetypes(ret)
+    if is_possibly_inaccurate_typeinference(ret)
         # we want to warn if the return type is not concrete
         # but we only want to warn for pure call to Out and not a call to isdef
         # we distinguish this via the stacktrace
 
-        trace = stacktrace()
-        called_from_within_isdef = any(trace) do stackfr
-            isnothing(stackfr.linfo) && return false
-            isa(stackfr.linfo, Core.MethodInstance) || return false
-            spec_types = stackfr.linfo.specTypes.parameters
-            !isempty(spec_types) && spec_types[1] === typeof(IsDef.isdef)
-        end
-
-        if !called_from_within_isdef
+        if !is_suppress_warnings_or_isdef()
             signature_novaltypes = signature_without_valtypes(signature_valtypes)
             Core.println(Core.stderr,
-                """WARNING: We falled back to using Core.Compiler.return_type,
-                however the inference returned a non-concrete type $(ret), which means that
-                we cannot fully trust the inference result.
-
-                Hence, you may want to check the original arguments:
-                > Core.Compiler.return_type(IsDef.valtype_apply, $signature_valtypes)
-                > Core.Compiler.return_type(IsDef.apply, $signature_novaltypes)
+                """$(YELLOW_FG("┌ Warning:")) We falled back to using Core.Compiler.return_type,
+                $(YELLOW_FG("│")) however the inference returned a non-concrete type $(ret), which means that
+                $(YELLOW_FG("│")) we cannot fully trust the inference result.
+                $(YELLOW_FG("│"))
+                $(YELLOW_FG("│")) Hence, you may want to check the original arguments:
+                $(YELLOW_FG("│")) > Core.Compiler.return_type(IsDef.valtype_apply, $signature_valtypes)
+                $(YELLOW_FG("└")) > Core.Compiler.return_type(IsDef.apply, $signature_novaltypes)
                 """
             )
         end

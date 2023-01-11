@@ -11,11 +11,29 @@ CurrentModule = IsDef
 ```@docs
 isdef
 Out
-return_type
+```
+
+## ValType
+
+```@docs
+ValTypes
+ValType
+ValTypeof
+```
+
+## Special Applicability Types
+
+```@docs
+NotApplicable
+UnsureWhetherApplicable
+ApplicabilityProblem
+isapplicable
 ```
 
 ## Other helpers
 ```@docs
 apply
-∨
+Core_return_type
+revise!
+suppress_warnings
 ```

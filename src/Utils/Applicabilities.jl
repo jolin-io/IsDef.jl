@@ -1,5 +1,5 @@
-module DataTypes
-export ApplicabilityProblem, NotApplicable, UnsureWhetherApplicable, TypeValueFunction, IntrinsicFunction
+module Applicabilities
+export ApplicabilityProblem, NotApplicable, UnsureWhetherApplicable, isapplicable
 
 abstract type ApplicabilityProblem end
 Base.instances(::Type{ApplicabilityProblem}) = (NotApplicable, UnsureWhetherApplicable)
@@ -14,14 +14,8 @@ struct UnsureWhetherApplicable <: ApplicabilityProblem
     UnsureWhetherApplicable() = error("Please use `UnsureWhetherApplicable` type instead of `UnsureWhetherApplicable()` instance.")
 end
 
-
 isapplicable(::Type{NotApplicable}) = false
 isapplicable(::Type{UnsureWhetherApplicable}) = false
 isapplicable(other) = true
-
-
-struct TypeValueFunction{F} <: Function
-    func::F
-end
 
 end

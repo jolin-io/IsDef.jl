@@ -1,27 +1,21 @@
 # IsDef.jl
 
-This package provides primitives for dispatching on whether certain methods are implemented or not.
-It exports two functions for general usage
-* `isdef(f, Arg1Type, Arg2Type, ...)::Bool` and
-* `Out(f, Arg1Type, Arg2Type)::ReturnType`
-which build upon an internal function `IsDef.return_type(Tuple{typeof(f), Arg1Type, Arg2Type, ...})::ReturnType`.
-
-
-## Installation
-
-```julia
-using Pkg
-pkg"registry add https://github.com/JuliaRegistries/General"  # central julia registry
-pkg"registry add https://github.com/schlichtanders/SchlichtandersJuliaRegistry.jl"  # custom registry
-pkg"add IsDef"
-```
-
-After installation, use the package by simply
+For installation or usage, open julia repl and run
 ```julia
 using IsDef
 ```
-which makes `isdef` and `Out` available.
+which gives you access to following functions
 
+- `isdef(f, Arg1Type, Arg2Type, ...)::Bool` checks whether a function is defined for the given types.
+- `Out(f, Arg1Type, Arg2Type)::ReturnType` returns the returntype of the given functioncall. Note, that it may return an abstract type that is wider than necessary, like e.g. `Any`. `Out` is internally used by `isdef`.
+
+Internally of `Out(f, Arg1Type, Arg2Type)` a one-argument-version of `Out` is used which expects a single Tuple type, specifying the entire call signature. This is the heart of the `IsDef` package. For the example it would be
+- `Out(Tuple{typeof(f), Arg1Type, Arg2Type})`
+
+If you want to specify inference of your method (output of `Out`), or whether it is defined (output of `isdef`), you need to overload this very one-argument method of `Out`. For the example it could be
+- `Out(::Type{<:Tuple{typeof(f), Arg1Type, Arg2Type, Vararg}}) = ReturnType`
+
+Enjoy maintainable typeinference.
 
 ## Manual Outline
 

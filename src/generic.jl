@@ -3,10 +3,12 @@ using MacroTools: MacroTools, isexpr
 using SimpleMatch: @match
 
 using IsDef.Utils.TricksAdapted: static_hasmethod, static_hasnomethod, covering_method_instances
-using IsDef.DataTypes: NotApplicable, isapplicable, TypeValueFunction
+using IsDef.Utils.Applicabilities: NotApplicable, isapplicable
 using IsDef.Utils.TypeUtils: Tuple_type_to_value, Tuple_value_to_type, IntrinsicFunction, signature_split_first, isleaf_type
-using IsDef.Utils.ValTypes: ValType, ValTypeof, signature_without_valtypes
+using IsDef.Utils.ValTypes: ValType, ValTypeof, signature_without_valtypes, ValTypeFunction
 using IsDef.Utils.IRToolsUtils: new_out, signature_to_irargs, irargs_to_signature, type_to_irvalue, irvalue_to_type, detect_cycle, keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
+
+using Crayons.Box
 
 # Out
 # ===
@@ -16,10 +18,10 @@ special handling of TypeLevelFunctions which already work on type-TypeLevel
 
 these are mainly functions which are defined for internal purposes
 """
-function Out(::Type{signature_typevalues}) where {signature_typevalues <: Tuple{TypeValueFunction, Vararg}}
+function Out(::Type{signature_typevalues}) where {signature_typevalues <: Tuple{ValTypeFunction, Vararg}}
     functype, args... = Tuple_type_to_value(signature_typevalues)
     func = @match(functype) do f
-        f(::Type{TypeValueFunction{F}}) where F = F.instance
+        f(::Type{ValTypeFunction{F}}) where F = F.instance
     end
     return func(args...)
 end
@@ -65,7 +67,6 @@ function _Out_dynamo_expr(function_name=:Out; isdynamo=true)
             )
             if !isempty(mts)
                 method_instance = only(mts)
-                Core.println("method_instance.def.sig = $(method_instance.def.sig)")
                 parameters = if isa(method_instance.def.sig, UnionAll)
                     fieldtypes(method_instance.def.sig)
                 else
@@ -73,23 +74,23 @@ function _Out_dynamo_expr(function_name=:Out; isdynamo=true)
                 end
                 found_generic_base_function = any(t -> t ∈ TOO_GENERIC_TYPES, parameters)
                 found_generic_base_function && Core.println(Core.stderr, """
-                    WARNING: Recursed to a generic leaf function (everything is from Base or Core, and found at least one too generic type $TOO_GENERIC_TYPES).
-
-                    Please, overwrite `IsDef.Out` for the general case, e.g. with a fallback to Core.Compiler.return_type like so:
-                    ```julia
-                    IsDef.Out(::Type{T}) where T <: $(method_instance.def.sig) = IsDef.Core_return_type(IsDef.apply, T)
-                    ```
-
-                    Alternatively you can overwrite the given concrete case
-                    ```julia
-                    IsDef.Out(::Type{$signature_valtypes}) = ...
-                    ```
-                    Or overwrite another function called before this one in the callstack.
-
-                    It is always recommended not to use Core_return_type if you know the return type by other means.
-                    """)
+                    $(YELLOW_FG("┌ Warning:")) Recursed to a generic leaf function (everything is from Base or Core, and found at least one too generic type $TOO_GENERIC_TYPES).
+                    $(YELLOW_FG("│"))
+                    $(YELLOW_FG("│")) Please, overwrite `IsDef.Out` for the general case, e.g. with a fallback to Core.Compiler.return_type like so:
+                    $(YELLOW_FG("│")) ```julia
+                    $(YELLOW_FG("│")) IsDef.Out(::Type{T}) where T <: ($(method_instance.def.sig)) = IsDef.Core_return_type(IsDef.apply, T)
+                    $(YELLOW_FG("│")) ```
+                    $(YELLOW_FG("│"))
+                    $(YELLOW_FG("│")) Alternatively you can overwrite the given concrete case
+                    $(YELLOW_FG("│")) ```julia
+                    $(YELLOW_FG("│")) IsDef.Out(::Type{$signature_valtypes}) = ...
+                    $(YELLOW_FG("│")) ```
+                    $(YELLOW_FG("│")) Or overwrite another function called before this one in the callstack.
+                    $(YELLOW_FG("│"))
+                    $(YELLOW_FG("│")) It is always recommended not to use Core_return_type if you know the return type by other means.
+                    $(YELLOW_FG("└")) """)
             else
-                Core.println(Core.stderr, "Warning: found empty method_instances for signature $signature_novaltypes.")
+                # # Core.println(Core.stderr, "Warning: found empty method_instances for signature $signature_novaltypes.")
                 # in the case that the method table is empty, no method is available yet, hence static_hasmethod will return false, but retrigger
                 # compilation if the method is redefined. We simply fallback to Core.Compiler.return_type in this case, even though we do not know
                 # whether we use it on a generic method.

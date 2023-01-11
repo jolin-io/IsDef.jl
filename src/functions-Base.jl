@@ -1,5 +1,11 @@
 using IsDef.Utils.ValTypes: promote_type_or_valtype, ValType, ValTypeof
 
+# identity
+# --------
+
+Out(::Type{Tuple{typeof(identity), T}}) where {T} = T
+
+
 # Bool operations
 # ---------------
 
@@ -57,7 +63,16 @@ function Out(::Type{Tuple{typeof(map), F, A}}) where {F, A}
 end
 
 
-# iterate
+# similar
 # .......
 
-# IsDef.Out(::Type{Tuple{typeof(iterate), OrdinalRange{T}, Any} where T}) = ...
+IsDef.Out(::Type{<:Tuple{typeof(similar), Array{T1, N}, Type{T2}}}) where {T1, N, T2} = Array{T2, N}
+
+
+# Constructors
+# ------------
+
+# Some
+# ....
+
+IsDef.Out(::Type{Tuple{Type{Some}, T}}) where T = Some{T}

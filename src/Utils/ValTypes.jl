@@ -1,6 +1,8 @@
 module ValTypes
 
-export isvaltypevalue, isvaltype, ValType, ValTypeof, valtype_apply, signature_without_valtypes, promote_type_or_valtype, ensure_valtype_or_type
+export isvaltypevalue, isvaltype, ValType, ValTypeof
+export valtype_apply, signature_without_valtypes, ensure_valtype_or_type
+export promote_type_or_valtype, ValTypeFunction
 
 using IsDef.Utils.TypeUtils: Tuple_type_to_value, Tuple_value_to_type, NamedTuple_value_to_type, NamedTuple_type_to_value
 using IsDef: apply
@@ -125,5 +127,16 @@ promote_type_or_valtype(A::Type, ::Type{<:ValType{B}}) where B = promote_type(A,
 
 promote_type_or_valtype(::Type{<:ValType{A}}, ::Type{<:ValType{B}}) where {A, B} = promote_type(A, B)
 promote_type_or_valtype(A::Type, B::Type) = promote_type(A, B)
+
+
+"""
+    ValTypeFunction(func)
+
+Internal. Marks a function to be directly evaluated on the types given to
+`Out(Tuple{typeof(func), ArgType1, ArgType2})` (possibly ValTypes).
+"""
+struct ValTypeFunction{F} <: Function
+    func::F
+end
 
 end
