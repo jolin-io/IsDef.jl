@@ -96,6 +96,18 @@ end
 traits_func_new2(MyType())
 # helloworld
 ```
+or without the `supports_interface` helper:
+```julia
+using WhereTraits
+@traits function traits_func_new3(a) where {
+        isdef(interface_func1, a),
+        isdef(interface_func2, a),
+    }
+    println(interface_func1(a), interface_func2(a))
+end
+traits_func_new3(MyType())
+# helloworld
+```
 
 Note that `isdef` does not rely on convention, but checks whether the interface functions are defined or not.
 
