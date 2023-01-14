@@ -20,13 +20,13 @@ end
 
 # taken from https://github.com/JuliaLang/julia/issues/12711#issuecomment-912740865
 function redirect_stderrio(f::Function, io::IO)
-    old_stderr = stdout
+    old_stderr = stderr
     rd, = redirect_stderr()
     task = @async write(io, rd)
     try
         ret = f()
         Libc.flush_cstdio()
-        flush(stdout)
+        flush(stderr)
         return ret
     finally
         close(rd)
