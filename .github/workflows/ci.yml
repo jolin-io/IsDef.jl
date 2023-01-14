@@ -9,7 +9,7 @@ jobs:
     strategy:
       matrix:
         version:
-          - '1.6'
+          - '1.7'  # 1.6 leads segmentation fault on testing
           - '1.8'
           - 'nightly'
         os:
