@@ -5,7 +5,7 @@ export Core_return_type
 using IsDef: IsDef
 using IsDef.Utils.Applicabilities: NotApplicable, UnsureWhetherApplicable
 using IsDef.Utils.ValTypes: ValType, valtype_apply, isvaltypevalue, signature_without_valtypes
-using IsDef.Utils.IOUtils: is_suppress_warnings, is_suppress_warnings_or_isdef
+using IsDef.Utils.IOUtils: is_suppress_warnings
 using Crayons.Box
 
 is_union_or_concretetype_or_union_of_concretetypes(type) = isconcretetype(type)
@@ -61,7 +61,7 @@ function Core_return_type(::Type{signature_valtypes}) where signature_valtypes <
         # but we only want to warn for pure call to Out and not a call to isdef
         # we distinguish this via the stacktrace
 
-        if !is_suppress_warnings_or_isdef()
+        if !is_suppress_warnings()
             signature_novaltypes = signature_without_valtypes(signature_valtypes)
             Core.println(Core.stderr,
                 """$(YELLOW_FG("┌ Warning:")) We falled back to using Core.Compiler.return_type,

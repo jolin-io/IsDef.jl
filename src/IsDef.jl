@@ -2,6 +2,7 @@ module IsDef
 using Reexport
 export apply
 export isdef, Out
+export isdef_debug, Out_debug
 export ApplicabilityProblem, NotApplicable, UnsureWhetherApplicable, isapplicable
 export ValTypes, ValType, ValTypeof
 
@@ -17,10 +18,11 @@ when only knowing the function type instead of the function instance.
 
 include("Utils/Utils.jl")
 using .Utils.IOUtils: suppress_warnings
-# using .Utils.TypeUtils: kwftype, Tuple_value_to_type, NamedTuple_value_to_type, IntrinsicFunction
-using .Utils.ValTypes: ValTypes, valtype_apply, Typeof, ValType, ValTypeof
+using .Utils.TypeUtils: Typeof
+using .Utils.ValTypes: ValTypes, valtype_apply, ValType, ValTypeof
 using .Utils.CoreReturnType: Core_return_type
 using .Utils.Applicabilities: ApplicabilityProblem, NotApplicable, UnsureWhetherApplicable, isapplicable
+
 
 # Core Interface
 # ==============
@@ -35,15 +37,16 @@ This works in compile time and hence can be used to optimize code.
 When called on values, the values will be cast to types via use of `typeof` for
 convenience.
 """
-isdef(f, args::Vararg{Any, N}) where {N} = isdef(f, typeof.(args)...)
-function isdef(f::F, types::Vararg{Type, N}) where {F, N}
-    isdef(apply, Core.Typeof(f), types...)
+function isdef(f::F, types::Vararg{Any, N}; kwtypes...) where {F, N}
+    suppress_warnings() do
+        # we use IsDef.Typeof(f) to ensure, that the callable is always interpreted value-like
+        isapplicable(Out(apply, IsDef.Typeof(f), types...; kwtypes...))
+    end
 end
-# we use noinline in order to always see `isdef` on the stacktrace and turn off warnings respectively
-@noinline function isdef(::typeof(apply), types::Vararg{Type, N}) where {N}
-    signature_type = Tuple{types...}
-    isapplicable(Out(signature_type))
-end
+
+# function isdef(f, types...; kwtypes...)
+#     error("`isdef` expects types as arguments, but got `isdef($(types...); $(kwtypes...))`")
+# end
 
 
 """
@@ -54,38 +57,50 @@ Returns outputtype of function application. Returns `IsDef.NotApplicable` if com
 notices that no Method can be found.
 """
 function Out(f::F, types::Vararg{Any, N}; kwtypes...) where {F<:Function, N}
-    Out(apply, Core.Typeof(f), types...; kwtypes...)
+    # we use IsDef.Typeof(f) to ensure, that the callable is always interpreted value-like
+    Out(apply, IsDef.Typeof(f), types...; kwtypes...)
 end
 
-# one extra dispatch for general F, however needing at least one argument
-function Out(f::F, type1, types::Vararg{Any, N}; kwtypes...) where {F, N}
+# one extra dispatch for general F, however needing at least one extra argument so that it is not confused with the generic Out(Tuple{...}) case
+function Out(f::F, type1::Any, types::Vararg{Any, N}; kwtypes...) where {F, N}
     # type1 is just to distinguish this dispatch from the standard Out(Tuple{...}) call
-    Out(apply, Core.Typeof(f), type1, types...; kwtypes...)
+    # we use IsDef.Typeof(f) to ensure, that the callable is always interpreted value-like
+    Out(apply, IsDef.Typeof(f), type1, types...; kwtypes...)
 end
 
+function Out(::typeof(apply), typef, types::Vararg{Any, N}; kwtypes...) where {N}
+    # as a compromise between convenience and safety, we either convert
+    # all arguments to types or none.
+    _types = Utils.got_some_nontypes(types) ? map(IsDef.Typeof, types) : types
+    types_final = tuple(typef, _types...)
 
-function Out(::typeof(apply), types::Vararg{Any, N}; kwtypes...) where {N}
-    types_ = map(Utils.ensure_valtype_or_type, types)
-    values_kwtypes = map(Utils.ensure_valtype_or_type, values(kwtypes))
-
-    if isempty(values(kwtypes))
-        signature_type = Tuple_value_to_type(types_)
+    _kwtypes = values(kwtypes)
+    if isempty(_kwtypes)
+        signature_type = Utils.Tuple_value_to_type(types_final)
         Out(signature_type)
     else
-        kw_type = NamedTuple_value_to_type(values_kwtypes)
-        signature_type = tuple(kwftype(types_[1]), kw_type, types_...)
+        kwtypes_final = Utils.got_some_nontypes(_kwtypes) ? map(IsDef.Typeof, _kwtypes) : _kwtypes
+        kwtype = Utils.NamedTuple_value_to_type(kwtypes_final)
+        signature_type = tuple(Utils.kwftype(types_final[1]), kwtype, types_final...)
         Out(signature_type)
     end
 end
 
+
+# Debug helper
+# ============
+
+include("Debug.jl")
+using .Debug: Out_debug, isdef_debug
+
 # Generic Fallback using IR
-# -------------------------
+# =========================
 
 include("generic.jl")
 
 
 # Ready Implementations of `Out`
-# ------------------------------
+# ==============================
 
 include("functions-intrinsic.jl")
 include("functions-builtin.jl")

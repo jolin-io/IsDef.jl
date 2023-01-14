@@ -1,11 +1,12 @@
 module ValTypes
 
 export isvaltypevalue, isvaltype, ValType, ValTypeof
-export valtype_apply, signature_without_valtypes, ensure_valtype_or_type
-export promote_type_or_valtype, ValTypeFunction
+export valtype_apply, signature_without_valtypes
+export promote_type_or_valtype
 
 using IsDef.Utils.TypeUtils: Tuple_type_to_value, Tuple_value_to_type, NamedTuple_value_to_type, NamedTuple_type_to_value
 using IsDef: apply
+
 
 # typevalues & ValType
 # ----------------
@@ -65,38 +66,9 @@ end
 ValType(value) = error("ValType is not meant for creating any instance. You probably want to use `Valtypeof($value)` instead.")
 
 "important: the ValType construct DOES NOT construct a value, but a type."
-ValTypeof(Value) = ValType{typeof(Value), Value}
+ValTypeof(value::T) where T = ValType{Core.Typeof(value), value}
 
 Base.get(::Type{ValType{T, Value}}) where {T, Value} = Value
-
-
-"""
-        Typeof("hi") = String
-        Typeof(:hi) = ValType{String, :hi}
-        Typeof(1) = ValType(Int, 1)
-        Typeof(Float32) = Type{Float32}
-
-Version of Core.Typeof with support for ValType.
-
-# Example
-general example how to dispatch on Typeof values
-```julia
-julia> a = :hi
-:hi
-
-julia> Typeof(a) <: Union{typeof(a), ValType{typeof(a)}}
-true
-```
-"""
-Typeof(a) = isvaltypevalue(a) ? ValTypeof(a) : Core.Typeof(a)
-Typeof(a::Function) = Core.Typeof(a)  # functions are isbits surprisingly. Still it seems slightly more convenient to work on type level, as we can use Union then
-
-
-ensure_valtype_or_type(type::Type) = type
-function ensure_valtype_or_type(other)
-    isvaltypevalue(other) || error("need either isbits, Symbol or plain Type as argument, bot got `$other`. See `istypevalue` for details.")
-    ValTypeof(other)
-end
 
 
 function valtype_apply(f, args...; kwargs...)
@@ -111,8 +83,8 @@ _extract_valtypes(t::Union{Tuple, NamedTuple}) = map(_extract_valtypes, t)
 
 # cache results by @generated - it is a type-stable method, hence safe
 @generated signature_without_valtypes(::Type{T}) where T<:Tuple = _without_valtype(T)
-_without_valtype(typevalue::Type{<:ValType{T}}) where T = T
-_without_valtype(type::Type) = type
+_without_valtype(::Type{<:ValType{T}}) where T = T
+_without_valtype(::Type{T}) where T = T
 _without_valtype(::Type{T}) where T<:Tuple = Tuple_value_to_type(map(_without_valtype, Tuple_type_to_value(T)))
 _without_valtype(::Type{NT}) where NT<:NamedTuple = NamedTuple_value_to_type(map(_without_valtype, NamedTuple_type_to_value(NT)))
 
@@ -127,16 +99,5 @@ promote_type_or_valtype(A::Type, ::Type{<:ValType{B}}) where B = promote_type(A,
 
 promote_type_or_valtype(::Type{<:ValType{A}}, ::Type{<:ValType{B}}) where {A, B} = promote_type(A, B)
 promote_type_or_valtype(A::Type, B::Type) = promote_type(A, B)
-
-
-"""
-    ValTypeFunction(func)
-
-Internal. Marks a function to be directly evaluated on the types given to
-`Out(Tuple{typeof(func), ArgType1, ArgType2})` (possibly ValTypes).
-"""
-struct ValTypeFunction{F} <: Function
-    func::F
-end
 
 end

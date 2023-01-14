@@ -3,6 +3,8 @@ using Test
 using Documenter
 import FunctionWrappers: FunctionWrapper
 
+# TODO test kwargs
+
 include("IOUtils.jl")
 using .IOUtils: redirect_stdoutio, redirect_stderrio
 
@@ -13,8 +15,7 @@ using .IOUtils: redirect_stdoutio, redirect_stderrio
 
 iobuffer = IOBuffer()
 function my_print_warnings()
-    IsDef.Utils.is_suppress_warnings() || Core.println("no suppress_warnings")
-    IsDef.Utils.is_suppress_warnings_or_isdef() || Core.println("neither suppress_warnings nor isdef")
+    IsDef.Utils.is_suppress_warnings() || Core.print("no suppress_warnings")
 end
 
 
@@ -23,9 +24,7 @@ end
 redirect_stdoutio(iobuffer) do
     my_print_warnings()
 end
-@test String(take!(iobuffer)) == """no suppress_warnings
-neither suppress_warnings nor isdef
-"""
+@test String(take!(iobuffer)) == "no suppress_warnings"
 
 redirect_stdoutio(iobuffer) do
     IsDef.suppress_warnings() do
@@ -60,6 +59,28 @@ end
 @test @inferred(Out(x -> 2x, Int)) == Int
 @test @inferred(Out(x -> 2.3x, Int)) == Float64
 
+
+# test passing values
+# -------------------
+
+# as of now, Julia's typeinference is too bad to generically support VapType interpretation
+# for details see https://discourse.julialang.org/t/surprising-type-widening-when-constructing-tuple/92840
+# hence input values are always interpreted as dynamic variables (and not as literal constants)
+@test @inferred(Out(x -> 2x, 3)) == Int
+# you can always go typelevel and use ValTypes instead
+@test @inferred(Out(x -> 2x, ValTypeof(3))) == ValType{Int64, 6}
+@test @inferred(Out(x -> 2x, 3.4)) == Float64
+
+@test @inferred(Out((a, b) -> a * b, 3, 4)) == Int
+@test @inferred(Out((a, b) -> a * b, 3.4, 4)) == Float64
+@test @inferred(Out((a, b) -> a * b, 3.4, 4.5)) == Float64
+
+# combining values and types is not possible, use ValTypes instead
+@test @inferred(Out((a, b) -> a * b, ValTypeof(3), Int)) == Int
+@test @inferred(Out((a, b) -> a * b, Float64, ValTypeof(4))) == Float64
+@test @inferred(Out((a, b) -> a * b, ValTypeof(3.4), Float64)) == Float64
+
+
 # test ifelse
 # -----------
 
@@ -79,6 +100,9 @@ end
 @test @inferred(Out((a, b) -> ifelse2(false, a, b), Int, String)) == Int
 @test @inferred(Out((a, b) -> ifelse2(true, a, b), Int, String)) == String
 
+
+# test more complex inferences
+# ----------------------------
 
 function forloop_simple(a, b)
     sum = 0
@@ -176,17 +200,18 @@ f(a) = a + a
 # test inference on isdef
 # -----------------------
 
-@test Base.promote_op((args...) -> Val(isdef(args...)), typeof(sin), Int) == Val{true}
+isdef_Val(args...) = Val(isdef(args...))
+@test Base.promote_op(isdef_Val, typeof(sin), Type{Int}) == Val{true}
 
 mywrapper(args...) = myfunc(args...)
 myfunc(::BigFloat) = "big"
 myfunc(::Float16) = 16
 myfunc(::Float32) = 32
-@test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), Float64) == Val{false}
-@test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), BigFloat) == Val{true}
-@test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), Float16) == Val{true}
-@test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), Float32) == Val{true}
-@test Base.promote_op((args...) -> Val(isdef(args...)), typeof(mywrapper), AbstractFloat) == Val
+@test Base.promote_op(isdef_Val, typeof(mywrapper), Type{Float64}) == Val{false}
+@test Base.promote_op(isdef_Val, typeof(mywrapper), Type{BigFloat}) == Val{true}
+@test Base.promote_op(isdef_Val, typeof(mywrapper), Type{Float16}) == Val{true}
+@test Base.promote_op(isdef_Val, typeof(mywrapper), Type{Float32}) == Val{true}
+@test Base.promote_op(isdef_Val, typeof(mywrapper), Type{AbstractFloat}) == Val
 
 
 # test documentation

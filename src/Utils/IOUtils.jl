@@ -1,5 +1,5 @@
 module IOUtils
-export suppress_warnings, is_suppress_warnings, is_suppress_warnings_or_isdef, is_called_within_method
+export suppress_warnings, is_suppress_warnings, is_called_within_method
 
 using IsDef: IsDef
 
@@ -7,10 +7,6 @@ using IsDef: IsDef
 
 function is_suppress_warnings()
     is_called_within_method(suppress_warnings)
-end
-
-function is_suppress_warnings_or_isdef()
-    is_called_within_method(suppress_warnings, IsDef.isdef)
 end
 
 function is_called_within_method(methods::Vararg{Any, N}) where N

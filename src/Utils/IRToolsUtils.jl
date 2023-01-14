@@ -1,87 +1,17 @@
 module IRToolsUtils
 
-export new_out, irargs_to_signature, signature_to_irargs, type_to_irvalue, irvalue_to_type, detect_cycle, keep_only_what_is_explicitly_used!, shortcycle_if_notapplicable!, lift_ifelse!, iterateblocks
+export ir_detect_cycle, ir_arguments_from_signature!, ir_keep_only_what_is_explicitly_used!, ir_shortcycle_if_notapplicable!, ir_lift_ifelse!, iterateblocks, ir_typify!
 
 using IsDef.Utils.Applicabilities: NotApplicable, UnsureWhetherApplicable, ApplicabilityProblem, isapplicable
-using IsDef.Utils.ValTypes: isvaltypevalue, ValType, ValTypeof, Typeof, ValTypeFunction
-using IsDef.Utils.TypeUtils: IntrinsicFunction, Tuple_value_to_type, Tuple_type_to_value, NamedTuple_value_to_type
+using IsDef.Utils.ValTypes: isvaltypevalue, ValType, ValTypeof
+using IsDef.Utils.TypeUtils: Typeof, IntrinsicFunction, Tuple_value_to_type, Tuple_type_to_value, NamedTuple_value_to_type
+using IsDef.Utils.TricksAdapted: static_hasnomethod
 
 using Setfield
 using IRTools: IRTools, IR, @dynamo, recurse!, xcall
 using MacroTools: MacroTools, isexpr
 
-import IsDef
-
-
-# Covnert to and from inner IR values
-# -----------------------------------
-
-# There multiple things to consider:
-# 1) we need to track which value is a Type because it was already in the code as a Type,
-# or which value is a Type because it was returned by one of our rewritten Out functions
-# The difference is marked by an extra type `TypeLevel`.
-#
-# 2) plain values like literal `true` should be seen as literal `true` within the ir
-# however we want to represent it on type level with the special `ValType` type.
-
-"""
-        TypeLevel(type)
-
-implementation detail, used to mark a type as already being on TypeLevel (i.e. an output from `Out`),
-some parts may be return values from `Out` calls, and others may be normal constants.
-They somehow need to be distinguished
-"""
-struct TypeLevel{T}
-    value::T
-    # we need Core.Typeof to collect all available type information
-    TypeLevel(value) = new{Core.Typeof(value)}(value)
-end
-TypeLevel(typelevel::TypeLevel) = typelevel
-
-function Base.show(io::IO, x::TypeLevel)
-    print(io, "TypeLevel($(repr(x.value)))")
-end
-
-
-
-# we directly overload Tuple as several output arguments may be either Tuple or plain value, and in case of Tuple we want to broadcast
-# this is especially needed for splash ...
-type_to_irvalue(several::Union{Tuple, NamedTuple}) = map(type_to_irvalue, several)
-type_to_irvalue(single::TypeLevel) = single
-# typevalue (like 1, :symbol, true, ...) type information would get lost when put into TypeLevel
-# hence we leave them literal, just as if someone would have written a literal value into the source code
-type_to_irvalue(single) = isvaltypevalue(single) ? single : TypeLevel(single)
-type_to_irvalue(single::ValType{T, Value}) where {T, Value} = Value
-type_to_irvalue(single::Type{ValType{T, Value}}) where {T, Value} = Value
-type_to_irvalue(::Type{T}) where {T<:ApplicabilityProblem} = T
-
-
-irvalue_to_type(a::TypeLevel) = a.value
-# this is really needed, namely for splash ... arguments which internally get
-# represented as tuples. If we don't rewrap TypeLevel in there, we get Type problems
-irvalue_to_type(a::Tuple) = Tuple_value_to_type(map(irvalue_to_type, a))
-irvalue_to_type(a::NamedTuple) = NamedTuple_value_to_type(map(irvalue_to_type, a))
-irvalue_to_type(a) = Typeof(a)
-# TODO is this special handling of intrinsic functions still needed?
-irvalue_to_type(a::Core.IntrinsicFunction) = IntrinsicFunction{a}
-irvalue_to_type(::Type{T}) where {T<:ApplicabilityProblem} = T
-
-
-function irargs_to_signature(args...)
-    Tuple_value_to_type(map(irvalue_to_type, args))
-end
-
-function signature_to_irargs(::Type{signature_valtypes}) where signature_valtypes<:Tuple
-    type_to_irvalue(Tuple_type_to_value(signature_valtypes))
-end
-
-"""
-the output type of calling the internal function new, given the target output type
-"""  # if we already receive a type-level, we need to strap of one layer
-new_out(::TypeLevel{Type{Type{T}}}) where T = TypeLevel(T)
-new_out(::TypeLevel) = error("this should not happen")
-# if we receive value-level, we can directly treat it as type-level
-new_out(type) = type_to_irvalue(type)
+using IsDef: IsDef
 
 
 # IRTools helpers
@@ -125,15 +55,15 @@ function Base.iterate(wrapper::IRIterateBlocks, state = 1)
     IRTools.block(wrapper, state), (state+1)
 end
 
-# detect_cycle
+# ir_detect_cycle
 # ------------
 
 """
-        detect_cycle(ir)::Bool
+        ir_detect_cycle(ir)::Bool
 
 Returns true if the blocks have a cyclic dependency, otherwise false.
 """
-function detect_cycle(ir::IRTools.IR)
+function ir_detect_cycle(ir::IRTools.IR)
     # start with return blocks
     current_blocks = [IRTools.Block(ir, 1)]
     branch_trace = Set{IRTools.Block}()
@@ -158,7 +88,7 @@ end
 """
 deletes unused variables from the ir
 """
-function keep_only_what_is_explicitly_used!(ir)
+function ir_keep_only_what_is_explicitly_used!(ir)
     counts = count_return_variables(ir)
     unused_vars = [var for (var, count) in counts if count == 0]
     # iteratively delete all unused variables
@@ -222,16 +152,173 @@ function _count_variables!(branch::IRTools.Branch, dict!)
     end
 end
 
-function _count_variables!(other, dict!)
+function _count_variables!(other, dict!) end
+
+
+# Typify
+# ------
+
+extract_value_from_ValType(::Type{ValType{T, V}}) where {T, V} = V
+extract_value_from_ValType(::Type{T}) where T = T
+
+function ir_typify!(ir::IRTools.IR)
+    # change normal variables
+    statements = collect(ir)
+    for (var, st) in statements
+        ir_insert_before! = expr -> IRTools.insert!(ir, var, expr)
+        ir[var] = ir_typify(st, ir_insert_before!)
+    end
+
+    # change branch variables
+    for block in IRTools.blocks(ir)
+        branches = IRTools.branches(block)
+        for (i, branch) in enumerate(branches)
+            ir_insert_before! = expr -> IRTools.push!(block, expr)
+            branches[i] = ir_typify(branch, ir_insert_before!)
+        end
+    end
+end
+
+function ir_typify(st::IRTools.Statement, ir_insert_before!)
+    return IRTools.Statement(st, expr=ir_typify(st.expr, ir_insert_before!))
+end
+function ir_typify(br::IRTools.Branch, ir_insert_before!)
+    # literal args need to be changed
+    ir_typify!(br.args, ir_insert_before!)
+
+    condition = br.condition
+    if isa(condition, IRTools.Variable)
+        # all variables refer to types, however for branching condition we need
+        # literal bool value, hence we extract literal value from possible ValType
+        condition = ir_insert_before!(IRTools.xcall(extract_value_from_ValType, condition))
+    end
+    return IRTools.Branch(br, condition=condition)
+end
+
+function ir_typify(expr::Expr, ir_insert_before!)
+    ir_typify!(expr, ir_insert_before!)
+    return expr
+end
+
+function ir_typify(arg, ir_insert_before!)
+    # IR Variables already refer to typelevel
+    isa(arg, IRTools.Variable) && return arg
+
+    # nothing has special meaning as return value
+    arg === nothing && return Nothing
+
+    # QuoteNode (== literal Symbol)
+    if isa(arg, QuoteNode)
+        if isa(arg.value, Symbol)
+            return ValTypeof(arg.value)
+        else
+            error("found QuoteNode other than Symbol: $(arg.value)::$(typeof(arg.value))")
+        end
+    end
+
+    # GlobalRefs
+    if isa(arg, GlobalRef)
+        if isconst(arg.mod, arg.name)
+            value = getfield(arg.mod, arg.name)
+            return IsDef.ValTypes.isvaltypevalue(value) ? ValTypeof(value) : Typeof(value)
+        else
+            # if the global ref is not a constant, it may change dynamically
+            # hence we need runtime code here
+            newvar = ir_insert_before!(:($Typeof($arg)))
+            return newvar
+        end
+    end
+
+    # Plain bits
+    IsDef.ValTypes.isvaltypevalue(arg) && return ValTypeof(arg)
+
+    # final fallback (e.g. Strings and other literals)
+    return Typeof(arg)
 end
 
 
+function ir_typify!(expr::Expr, ir_insert_before!)
+    # curly is only used for type constructions, however these parameters should not be touched
+    # new is specially handled by code generation
+    expr.head ∉ (:curly, :new) || return
+    ir_typify!(expr.args, ir_insert_before!)
 
-# shortcylce
+    # if the expr is a call, change it to Out
+    expr.head === :call || return
+    newvar = ir_insert_before!(xcall(Core.apply_type, Base.Tuple, expr.args...))
+    expr.args = [GlobalRef(IsDef, :Out), newvar]
+end
+
+function ir_typify!(args::Vector, ir_insert_before!)
+    for (i, arg) in enumerate(args)
+        args[i] = ir_typify(arg, ir_insert_before!)
+    end
+end
+
+
+# initial Out arguments
+# ---------------------
+
+function ir_arguments_from_signature!(ir, ::Type{signature_valtypes}, ::Type{signature_novaltypes}) where {signature_valtypes, signature_novaltypes}
+    nargs = length(IRTools.arguments(ir))
+
+    # get dummy first block
+    block = IRTools.block!(ir, 1)
+    # which should have one single argument (the signature_typevalues)
+    IRTools.argument!(block)
+    # we start with a check wether the original method actually existed
+    # this also ensures us that code get's regenerated if this changes
+    var_hasnomethod = IRTools.push!(block, :($static_hasnomethod($signature_novaltypes)))
+
+    ir_args = Tuple_type_to_value(signature_valtypes)
+    var_args = IRTools.Variable[]
+    for i in 1:nargs-1
+        push!(var_args, IRTools.push!(block, ir_args[i]))
+    end
+    uses_args = which(signature_novaltypes).isva
+    final_arg = if uses_args
+        Tuple{ir_args[nargs:end]...}
+    else
+        ir_args[nargs]
+    end
+    push!(var_args, IRTools.push!(block, final_arg))
+
+    IRTools.branch!(block, IRTools.block(ir, 2), var_args..., unless=var_hasnomethod)
+    IRTools.return!(block, NotApplicable)
+end
+
+
+# shortcycle
 # ----------
 
 is_applicability_problem(_) = false
 is_applicability_problem(::Type{<:ApplicabilityProblem}) = true
+
+function ir_shortcycle_if_notapplicable!(ir::IRTools.IR)
+    # Note, as this introduces new branches, it has to be done after lifting ifelse
+    for block in iterateblocks(ir)
+        # we mutate the block, and here we don't want to see our mutations
+        # this still works, as the iterator returns variables and statements via variables
+        # which is stable against mutation of the block
+        # NOTE: length is defined for Block, but seems buggy
+        # TODO file an issue on IRTools about this
+
+        # hence we store the variables ourselves
+        vars = keys(block)  # returns an Array
+        for var in vars
+            statement = block.ir[var]
+            is_call_to_Out = isexpr(statement.expr, :call) && statement.expr.args[1] === GlobalRef(IsDef, :Out)
+            is_call_to_Out || continue
+
+            # We need to do shortcycling because a return value may be used as a Bool.
+            # Bool have special handling as they can define branching conditions.
+            # Things will fail in such situations, if we do not short-cycle on a NotApplicable.
+            ir_shortcycle_if_notapplicable!(ir, var)
+            break # this block is now done as we shortcycled it
+        end
+    end
+end
+
 
 @doc raw"""
         shortcycle_if_notapplicable_error!(ir::IRTools.IR, var::IRTools.Variable)
@@ -264,7 +351,7 @@ julia> ir_g = @code_ir g(1)
   %5 = Base.string("y = ", %4)
   return %5
 
-julia> IsDef.shortcycle_if_notapplicable!(ir_g, IRTools.var(3))
+julia> IsDef.ir_shortcycle_if_notapplicable!(ir_g, IRTools.var(3))
 %8
 
 julia> ir_g
@@ -285,7 +372,7 @@ julia> IRTools.func(ir_g)(g, "hi")
 "y = foo(x) = hi"
 ```
 """
-function shortcycle_if_notapplicable!(ir::IRTools.IR, var::IRTools.Variable)
+function ir_shortcycle_if_notapplicable!(ir::IRTools.IR, var::IRTools.Variable)
     condition = xcall(is_applicability_problem, var)
     shortcycle_after_var_if_condition!(ir, var, condition) do shortcycle_block, _continuation_block, _blockid_mapping, _var_is_condition
         IRTools.return!(shortcycle_block, var)
@@ -347,7 +434,7 @@ end
 # ------
 
 
-function lift_ifelse!(ir::IRTools.IR)
+function ir_lift_ifelse!(ir::IRTools.IR)
     IRTools.explicitbranch!(ir)
     # Change all branch.condition such that they can work with `Bool` in addition to `true` and `false`
     all_ifelse = Set{IRTools.Variable}()
@@ -368,15 +455,15 @@ function lift_ifelse!(ir::IRTools.IR)
             end
 
             # support Bool
-            lift_ifelse!(ir, block, condition_var)
+            ir_lift_ifelse!(ir, block, condition_var)
             push!(all_ifelse, condition_var)
         end
     end
     return ir
 end
 
-function lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse::IRTools.Variable)
-    condition = xcall(ValTypeFunction(isbooltype), var_ifelse)
+function ir_lift_ifelse!(ir::IRTools.IR, original_block::IRTools.Block, var_ifelse::IRTools.Variable)
+    condition = xcall(isbooltype, var_ifelse)
 
     # we need to copy before doing shortcycling,
     # because within shortcycling do-block the ir is in a corrupt intermediate state
@@ -515,7 +602,7 @@ function insert_Union_into_returns_step2_ifnotbranch(ifnot_block, T, visited_blo
         else # return branch
             # finally we can combine the two strengths
             i_endofblock = length(IRTools.BasicBlock(ifnot_block).stmts)
-            newreturnexpr = xcall(ValTypeFunction(create_union), T, only(branch.args))
+            newreturnexpr = xcall(create_union, T, only(branch.args))
             newreturnvariable = insert!(ifnot_block, i_endofblock+1, newreturnexpr)
             branch.args[1] = newreturnvariable
             # if we encounter multiple return, we ignore those which are never called
@@ -526,6 +613,10 @@ end
 
 create_union(a, b) = Union{a, b}
 
+
+# This is an implementation detail. It is used to check whether the return type of Out
+# is Bool, in which case a special ifelse logic will be executed which unites both the
+# if and the else branch. For simplicity, we directly return true/false here
 isbooltype(::Type{Bool}) = true
 isbooltype(other) = false
 

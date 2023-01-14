@@ -1,14 +1,22 @@
 module TypeUtils
 
+export got_some_nontypes
 export split_typevar
 export kwftype
 export signature_split_first, signature_add_first
 export Tuple_type_to_value, Tuple_value_to_type
 export NamedTuple_type_to_value, NamedTuple_value_to_type, NamedTupleEmpty
-export IntrinsicFunction
+export Typeof, IntrinsicFunction
 export isleaf_type
 
 using Crayons.Box
+
+function got_some_nontypes(args::Union{Tuple, NamedTuple})
+    return any(args) do arg
+        !isa(arg, Type)
+    end
+end
+
 
 split_typevar(base) = base, TypeVar[]
 function split_typevar(t::UnionAll)
@@ -38,7 +46,7 @@ however this destroys type information as of now, see https://discourse.julialan
 i.e. we use the simpler version as of now
 """
 Tuple_type_to_value(::Type{T}) where T<:Tuple = tuple(T.parameters...)
-Tuple_value_to_type(mytuple::Tuple) = Tuple{mytuple...}
+@inline Tuple_value_to_type(mytuple::T) where T<:Tuple  = Tuple{mytuple...}
 
 function NamedTuple_value_to_type(namedtuple::NT) where NT<:NamedTuple
     NamedTuple{keys(namedtuple), Tuple{values(namedtuple)...}}
@@ -61,6 +69,11 @@ struct IntrinsicFunction{Function}
     """)
 end
 
+Typeof(a::Core.IntrinsicFunction) = IntrinsicFunction{a}
+Typeof(::Type{T}) where T = Core.Typeof(T)
+Typeof(a::A) where A = Core.Typeof(a)
+
+Base.show(io::IO, ::typeof(Typeof)) = print(io, "IsDef.Typeof")
 
 """
                 _isleaf(type) -> Bool

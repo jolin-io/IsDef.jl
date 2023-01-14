@@ -14,9 +14,16 @@ For installation or usage, open julia repl and run
 using IsDef
 ```
 which gives you access to following functions
+- `isdef(f, arg1, arg2)::Bool` / `isdef(f, Arg1Type, Arg2Type)::Bool` checks whether a function is defined for the given types.
 
-- `isdef(f, Arg1Type, Arg2Type, ...)::Bool` checks whether a function is defined for the given types.
-- `Out(f, Arg1Type, Arg2Type)::ReturnType` returns the returntype of the given functioncall. Note, that it may return an abstract type that is wider than necessary, like e.g. `Any`. `Out` is internally used by `isdef`.
+    If at least one of the arguments is not a type,
+    all arguments are automatically converted to types for you.
+
+- `Out(f, arg1, arg2)::ReturnType` / `Out(f, Arg1Type, Arg2Type)::ReturnType` returns the returntype of the given functioncall.
+
+    Note, that `Out` may return an abstract type that is wider than necessary, like e.g. `Any`.
+    If a functioncall is not defined, or predictably throws an error, `IsDef.NotApplicable` is returned.
+    `Out` is internally used by `isdef`.
 
 Internally of `Out(f, Arg1Type, Arg2Type)` a one-argument-version of `Out` is used which expects a single Tuple type, specifying the entire call signature. This is the heart of the `IsDef` package. For the example it would be
 - `Out(Tuple{typeof(f), Arg1Type, Arg2Type})`
@@ -24,7 +31,108 @@ Internally of `Out(f, Arg1Type, Arg2Type)` a one-argument-version of `Out` is us
 If you want to specify inference of your method (output of `Out`), or whether it is defined (output of `isdef`), you need to overload this very one-argument method of `Out`. For the example it could be
 - `Out(::Type{<:Tuple{typeof(f), Arg1Type, Arg2Type, Vararg}}) = ReturnType`
 
-Enjoy maintainable typeinference.
+Enjoy maintainable type inference.
+
+
+## Example application: Use `isdef` for Traits
+
+Traits are a common mean to get back something like multiple inheritance to Julia.
+
+Let's say you want to dispatch on anything which provides a certain interface, which in
+julia simply means that a set of respective functions are defined for the type.
+
+```julia
+struct MyType end
+interface_func1(::MyType) = :hello
+interface_func2(::MyType) = "world"
+```
+
+Then the standard Trait pattern (sometimes called Holy Traits) goes like follows:
+```julia
+abstract type AbstractMyTrait end
+struct SupportsMyTrait <: AbstractMyTrait end
+
+traits_func(a::A) where A = traits_func(AbstractMyTrait(A), a)
+traits_func(::SupportsMyTrait, a) = println(interface_func1(a), interface_func2(a))
+```
+This defines a generic function which dispatches on our given trait type. Yet the trait needs
+to be associated with our interface function. This is usually done by mere convention,
+and we just link the trait-type with our custom type, assuming all functions are
+readily defined
+```julia
+AbstractMyTrait(::Type{MyType}) = SupportsMyTrait()  # use instance
+```
+Now our traits function works
+```julia
+traits_func(MyType())
+# helloworld
+```
+
+### No boilerplate with `isdef`
+
+The standard Traits implementation creates a lot of boilerplate. Do you really need to define these extra abstract trait types, trait structs and connection between your custom type and the trait type?
+
+You already defined that `MyType` implements `my_func`. We can reuse that information with `isdef`.
+This is how to rewrite the above `traits_func` (we use `Val` to dispatch on `Bool` values):
+```julia
+using IsDef
+supports_interface(a) = isdef(interface_func1, a) && isdef(interface_func2, a)
+traits_func_new(a) = traits_func_new(Val{supports_interface(a)}(), a)
+traits_func_new(::Val{true}, a) = println(interface_func1(a), interface_func2(a))
+```
+Which indeed works without defining any extra traits type:
+```julia
+traits_func_new(MyType())
+# helloworld
+```
+
+The nested dispatch syntax, as well as the use of `Val` can be simplified further
+by using a dedicated Trait systems like [WhereTraits.jl](https://github.com/jolin-io/WhereTraits.jl).
+```julia
+using WhereTraits
+@traits function traits_func_new2(a) where {supports_interface(a)}
+    println(interface_func1(a), interface_func2(a))
+end
+traits_func_new2(MyType())
+# helloworld
+```
+
+Note that `isdef` does not rely on convention, but checks whether the interface functions are defined or not.
+
+If `isdef` does return `false` despite it should be true, the fallback type inference
+was not good enough and you need to overload `Out` for either your interface functions
+or functions used within these.
+⚠️ Never overload `isdef`, instead always overload `Out(::Type{<:Tuple{...}})` ⚠️.
+
+
+## Why not using Julia's builtin type-inference directly?
+
+Julia already has a type inference method, namely `Base.promote_op` which internally uses `Core.Compiler.return_type`.
+So why do we need another type inference layer like `IsDef`?
+
+### The problem: Instability
+
+The issue with `Core.Compiler.return_type` is that we cannot rely on its output.
+Sometimes just changing the order of Julia code will change the type inference.
+Think of it as an implementation detail of Julia itself.
+
+Here the official warning in the `Base.promote_op` docs:
+> Due to its fragility, use of promote_op should be avoided. It is preferable to base the container eltype on the type of the actual elements. Only in the absence of any elements (for an empty result container), it may be unavoidable to call promote_op.
+
+And even using `Base.promote_op` for empty containers is not a good idea, use `Any` instead, or `Union{}`.
+Relying on an indeterministic implementation detail which may silently change its behaviour
+on every minor julia version is just bad practice.
+
+### Where IsDef's stability comes from
+
+That said, Julia's type-inference is very useful in that it is the best approximation
+we can get without any extra knowledge (remember, the worst type inference approximation is always `Any`).
+Hence it would be great to somehow use it in a safe manner.
+
+`IsDef` uses Julia's default type inference as a fallback, and adds three safety aspects:
+- `IsDef` uses automatice deterministic code generation where possible in order to entirely circumvent Julia's internal type inference
+- `IsDef` makes the type inference overloadable, so that if some fallback type inference changes between Julia versions, you can add a custom inference rule yourself to fix it.
+- [ValTypes](#valtypes) define a clean interface to work with bits values as part of type inference.
 
 
 ## Automatic Code Generation
@@ -121,7 +229,7 @@ DocTestSetup = nothing
 
 ## ValTypes
 
-Julia's type inference does take into account types as well as some of values.
+Julia's type inference does take into account types as well as some values.
 For instance, if you use a boolean variable somewhere which is known to be `true`, and have an if-else using it,
 julia may well be able to statically optimize your code accordingly.
 
@@ -164,3 +272,8 @@ true
 julia> ValTypeof(:two) <: (Union{T, ValType{T}} where T <: Union{Symbol, Int})
 true
 ```
+
+Limitations: Currently, Julia's typeinference does not work well if the value is not known
+at compile time. Practically, this means you should use `ValTypeof` only for constants
+or for values which you extracted from another `ValType`. (See [this discourse thread](https://discourse.julialang.org/t/surprising-type-widening-when-constructing-tuple/92840)
+for more details.)
