@@ -1,12 +1,9 @@
 module IsDef
-using Reexport
 export apply
 export isdef, Out
 export isdef_debug, Out_debug
 export ApplicabilityProblem, NotApplicable, UnsureWhetherApplicable, isapplicable
 export ValTypes, ValType, ValTypeof
-
-using Compat
 
 """
 just applies a given function to arguments and keyword arguments
