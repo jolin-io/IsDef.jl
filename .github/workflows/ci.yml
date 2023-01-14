@@ -9,8 +9,7 @@ jobs:
     strategy:
       matrix:
         version:
-          - '1.7'  # 1.6 leads segmentation fault on testing
-          - '1.8'
+          - '1.8'  # 1.6 and 1.7 lead segmentation fault on testing
           - 'nightly'
         os:
           - ubuntu-latest
