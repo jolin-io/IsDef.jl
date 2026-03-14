@@ -14,6 +14,10 @@ For installation or usage, open julia repl and run
 using IsDef
 ```
 which gives you access to following functions
+```julia
+isdef(f, arg1, arg2)::Bool
+Out(f, arg1, arg2)::ReturnType
+```
 - `isdef(f, arg1, arg2)::Bool` / `isdef(f, Arg1Type, Arg2Type)::Bool` checks whether a function is defined for the given types.
 
     If at least one of the arguments is not a type,
@@ -182,8 +186,6 @@ false
 
 `Out` follows the same syntax as `isdef` however instead of returning a Bool, it returns the actual inferred returntype.
 
-<!-- the output of Type aliases like Vector changed between julia versions, hence we don't use jldoctest -->
-
 ```julia
 julia> Out(Base.map, typeof(string), Vector{Int})
 Vector{String} (alias for Array{String, 1})
@@ -197,16 +199,12 @@ NotApplicable
 
 You can also do higher-order inference, e.g. when working with `Base.map`. Usually you would need a concrete function for its first argument, like
 
-<!-- the output of Type aliases like Vector changed between julia versions, hence we don't use jldoctest -->
-
 ```julia
 julia> Out(Base.map, typeof(isodd), Vector{Int})
 Vector{Bool} (alias for Array{Bool, 1})
 ```
 
 Thanks to the package `FunctionWrappers` you can define Function types also directly, without having a concrete function:
-
-<!-- the output of Type aliases like Vector changed between julia versions, hence we don't use jldoctest -->
 
 ```julia
 julia> import FunctionWrappers: FunctionWrapper

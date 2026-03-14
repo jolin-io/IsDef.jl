@@ -28,7 +28,7 @@ function Out(::Type{signature_typevalues}) where {signature_typevalues <: Tuple{
 end
 
 
-function Out(::Type{Tuple{IntrinsicFunction{Func}, Vararg}}) where {Func}
+function Out(::Type{signature_typevalues}) where {Func, signature_typevalues <: Tuple{IntrinsicFunction{Func}, Vararg}}
     # special handling of IntrinsicFunctions, because
     # 1) `static_hasmethod` does not work on them
     # 2) they don't have a proper type

@@ -13,6 +13,11 @@ For installation or usage, open julia repl and run
 using IsDef
 ```
 which gives you access to following functions
+```julia
+isdef(f, arg1, arg2)::Bool
+Out(f, arg1, arg2)::ReturnType
+```
+
 - `isdef(f, arg1, arg2)::Bool` / `isdef(f, Arg1Type, Arg2Type)::Bool` checks whether a function is defined for the given types.
 
     If at least one of the arguments is not a type,

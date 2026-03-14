@@ -35,7 +35,7 @@ function Out(signature_typevalues::Type{Tuple{typeof(promote_type), Type{T1}, Ty
     Core.Typeof(promote_type_or_valtype(T1, T2))
 end
 
-function Out(::Type{Tuple{typeof(convert), Type{T1}, T2}}) where {T1, T2}
+function Out(signature_typevalues::Type{Tuple{typeof(convert), Type{T1}, T2}}) where {T1, T2}
     signature_notypevalues = signature_without_valtypes(signature_typevalues)
     static_hasmethod(signature_notypevalues) || return NotApplicable  # TODO: we are assuming that if there is a method, it also works
     T1
